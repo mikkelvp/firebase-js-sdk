@@ -31,6 +31,8 @@ import { name, version } from './package.json';
 
 const DEFAULT_ENTRY_NAME = '[DEFAULT]';
 
+console.log('this is my local performance!');
+
 export function registerPerformance(instance: FirebaseNamespace): void {
   const factoryMethod = (
     app: FirebaseApp,

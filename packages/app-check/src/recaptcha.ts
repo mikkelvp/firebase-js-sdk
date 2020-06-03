@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2019 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,23 +15,4 @@
  * limitations under the License.
  */
 
-export interface FirebaseAppCheck {
-  /**
-   * Provide a custom attestation provider implementation
-   */
-  setCustomProvider(provider: AppCheckProvider): void;
-}
-
-interface AppCheckProvider {
-  /**
-   * returns a AppCheckProvider Token, e.g. reCAPTCHA token
-   * We will use this token to exchange for the Firebase AppCheckToken
-   */
-  getToken(): Promise<string>;
-}
-
-declare module '@firebase/component' {
-  interface NameServiceMapping {
-    'app-check': FirebaseAppCheck;
-  }
-}
+export function initialize(): void {}
