@@ -16,12 +16,10 @@
  */
 
 import { AppCheckProvider } from '@firebase/app-check-types';
-import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import { initialize as initializeRecaptcha } from './recaptcha';
-
-const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
+import { APP_CHECK_STATES, DEFAULT_STATE } from './state';
 
 export function setCustomProvider(
   app: FirebaseApp,
@@ -60,15 +58,6 @@ export function activate(app: FirebaseApp): void {
 
   if (!state.customProvider) {
     // initialize ReCAPTCHA
-    initializeRecaptcha();
+    initializeRecaptcha(app);
   }
 }
-
-interface AppCheckState {
-  activated: boolean;
-  customProvider?: AppCheckProvider;
-}
-
-const DEFAULT_STATE: AppCheckState = {
-  activated: false
-};

@@ -18,12 +18,8 @@
 import { FirebaseAppCheck, AppCheckProvider } from '@firebase/app-check-types';
 import { setCustomProvider, activate } from './api';
 import { FirebaseApp } from '@firebase/app-types';
-import {
-  FirebaseAppCheckInternal,
-  AppCheckTokenListener
-} from '@firebase/app-check-interop-types';
-
-const APP_CHECK_LISTENERS = new Map<FirebaseApp, AppCheckTokenListener>();
+import { FirebaseAppCheckInternal } from '@firebase/app-check-interop-types';
+import { getToken } from './internal-api';
 
 export function factory(app: FirebaseApp): FirebaseAppCheck {
   return {
@@ -35,7 +31,7 @@ export function factory(app: FirebaseApp): FirebaseAppCheck {
 
 export function internalFactory(app: FirebaseApp): FirebaseAppCheckInternal {
   return {
-    getToken: () => {},
+    getToken: () => getToken(app),
     addTokenListener: () => {},
     removeTokenListener: () => {}
   };

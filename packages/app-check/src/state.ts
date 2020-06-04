@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2019 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,20 @@
  * limitations under the License.
  */
 
-export interface FirebaseAppCheck {
-  /**
-   * Provide a custom attestation provider implementation
-   */
-  setCustomProvider(provider: AppCheckProvider): void;
+import { FirebaseApp } from '@firebase/app-types';
+import { AppCheckProvider } from '@firebase/app-check-types';
+import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
 
-  /**
-   * Activate AppCheck
-   */
-  activate(): void;
+export interface AppCheckState {
+  activated: boolean;
+  customProvider?: AppCheckProvider;
 }
 
-interface AppCheckProvider {
-  /**
-   * returns a AppCheckProvider Token, e.g. reCAPTCHA token
-   * We will use this token to exchange for the Firebase AppCheckToken
-   */
-  getToken(): Promise<string>;
-}
-
-declare module '@firebase/component' {
-  interface NameServiceMapping {
-    'app-check': FirebaseAppCheck;
-  }
-}
+export const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
+export const DEFAULT_STATE: AppCheckState = {
+  activated: false
+};
+export const APP_CHECK_LISTENERS = new Map<
+  FirebaseApp,
+  AppCheckTokenListener
+>();

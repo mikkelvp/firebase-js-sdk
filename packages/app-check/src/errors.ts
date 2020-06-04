@@ -20,7 +20,8 @@ import { ErrorFactory, ErrorMap } from '@firebase/util';
 export const enum AppCheckError {
   ALREADY_ACTIVATED = 'already-activated',
   PROVIDER_ALREADY_SET = 'provider-already-set',
-  SET_PROVIDER_AFTER_ACTIVATED = 'set-provider-after-activated'
+  SET_PROVIDER_AFTER_ACTIVATED = 'set-provider-after-activated',
+  USE_BEFORE_ACTIVATION = 'use-before-activation'
 }
 
 const ERRORS: ErrorMap<AppCheckError> = {
@@ -35,13 +36,17 @@ const ERRORS: ErrorMap<AppCheckError> = {
   [AppCheckError.SET_PROVIDER_AFTER_ACTIVATED]:
     'You are trying to set customProvider for AppCheck for FirebaseApp ${name}, ' +
     'while the AppCheck has been already activated. ' +
-    "You can't set customProvider on an activated AppCheck instance."
+    "You can't set customProvider on an activated AppCheck instance.",
+  [AppCheckError.USE_BEFORE_ACTIVATION]:
+    'AppCheck is being used before activate() is called for FirebaseApp ${name}. ' +
+    'Please make sure you call activate() before instantiating other Firebase services.'
 };
 
 interface ErrorParams {
   [AppCheckError.ALREADY_ACTIVATED]: { name: string };
   [AppCheckError.PROVIDER_ALREADY_SET]: { name: string };
   [AppCheckError.SET_PROVIDER_AFTER_ACTIVATED]: { name: string };
+  [AppCheckError.USE_BEFORE_ACTIVATION]: { name: string };
 }
 
 export const ERROR_FACTORY = new ErrorFactory<AppCheckError, ErrorParams>(
