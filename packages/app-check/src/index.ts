@@ -19,9 +19,10 @@ import { _FirebaseNamespace } from '@firebase/app-types/private';
 import { Component, ComponentType } from '@firebase/component';
 import { FirebaseAppCheck } from '@firebase/app-check-types';
 import { factory, internalFactory } from './factory';
+import { FirebaseAppCheckInternal } from '@firebase/app-check-interop-types';
 
-const APP_CHECK_NAME = 'app-check';
-const APP_CHECK_NAME_INTERNAL = 'app-check-internal';
+const APP_CHECK_NAME = 'appCheck';
+const APP_CHECK_NAME_INTERNAL = 'appCheckInternal';
 function registerAppCheck(firebase: _FirebaseNamespace): void {
   // The public interface
   firebase.INTERNAL.registerComponent(
@@ -45,7 +46,7 @@ function registerAppCheck(firebase: _FirebaseNamespace): void {
         const app = container.getProvider('app').getImmediate();
         return internalFactory(app);
       },
-      ComponentType.PRIVATE
+      ComponentType.PUBLIC
     )
   );
 }
@@ -58,8 +59,10 @@ registerAppCheck(firebase as _FirebaseNamespace);
 declare module '@firebase/app-types' {
   interface FirebaseNamespace {
     appCheck(app?: FirebaseApp): FirebaseAppCheck;
+    appCheckInternal(): FirebaseAppCheckInternal;
   }
   interface FirebaseApp {
     appCheck(): FirebaseAppCheck;
+    appCheckInternal(): FirebaseAppCheckInternal;
   }
 }

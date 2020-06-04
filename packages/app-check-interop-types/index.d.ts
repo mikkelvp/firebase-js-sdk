@@ -42,6 +42,6 @@ interface AppCheckToken {
 
 declare module '@firebase/component' {
   interface NameServiceMapping {
-    'app-check-internal': FirebaseAppCheckInternal;
+    'appCheckInternal': FirebaseAppCheckInternal;
   }
 }

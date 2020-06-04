@@ -37,6 +37,6 @@ interface AppCheckProvider {
 
 declare module '@firebase/component' {
   interface NameServiceMapping {
-    'app-check': FirebaseAppCheck;
+    'appCheck': FirebaseAppCheck;
   }
 }

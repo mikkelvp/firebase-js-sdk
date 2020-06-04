@@ -53,7 +53,7 @@ export async function getToken(app: FirebaseApp): Promise<string> {
       // TODO: update app.options and confirm the official name for siteKey
       resolve(
         recaptcha.execute((app.options as any).siteKey, {
-          action: 'fire-app-check'
+          action: 'fire_app_check'
         })
       );
     });
