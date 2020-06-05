@@ -17,9 +17,16 @@
 
 import { getToken as getReCAPTCHAToken } from './recaptcha';
 import { FirebaseApp } from '@firebase/app-types';
-import { AppCheckToken } from '@firebase/app-check-interop-types';
+import {
+  AppCheckToken,
+  AppCheckTokenListener
+} from '@firebase/app-check-interop-types';
 import { APP_CHECK_STATES, DEFAULT_STATE, AppCheckState } from './state';
 import { ERROR_FACTORY, AppCheckError } from './errors';
+import {
+  EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
+  EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT
+} from './constants';
 
 export async function getToken(
   app: FirebaseApp
@@ -27,19 +34,24 @@ export async function getToken(
   const state = APP_CHECK_STATES.get(app) || DEFAULT_STATE;
   ensureActivated(app, state);
 
-  let attestedClaimsToken;
   if (state.customProvider) {
-    attestedClaimsToken = await state.customProvider.getToken();
+    const attestedClaimsToken = await state.customProvider.getToken();
+    return exchangeCustomTokenForAppCheckToken(attestedClaimsToken);
   } else {
-    attestedClaimsToken = await getReCAPTCHAToken(app);
+    const attestedClaimsToken = await getReCAPTCHAToken(app);
+    return exchangeReCAPTCHATokenForAppCheckToken(attestedClaimsToken);
   }
-
-  // TODO: integrate with backend to get the actual AppCheckToken
-  return {
-    token: attestedClaimsToken,
-    expirationTime: 123
-  };
 }
+
+export function addTokenListener(
+  app: FirebaseApp,
+  listener: AppCheckTokenListener
+) {}
+
+export function removeTokenListener(
+  app: FirebaseApp,
+  listener: AppCheckTokenListener
+) {}
 
 function ensureActivated(app: FirebaseApp, state: AppCheckState) {
   if (!state.activated) {
@@ -47,4 +59,24 @@ function ensureActivated(app: FirebaseApp, state: AppCheckState) {
       name: app.name
     });
   }
+}
+// TODO: integrate with the actual backend to get the AppCheckToken
+async function exchangeCustomTokenForAppCheckToken(
+  customToken: string
+): Promise<AppCheckToken> {
+  const endpoint = EXCHANGE_CUSTOM_TOKEN_ENDPOINT;
+  return {
+    token: `fake-app-check-token-${customToken}`,
+    expirationTime: 123
+  };
+}
+// TODO: integrate with the actual backend to get the AppCheckToken
+async function exchangeReCAPTCHATokenForAppCheckToken(
+  reCAPTCHAToken: string
+): Promise<AppCheckToken> {
+  const endpoint = EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT;
+  return {
+    token: `fake-app-check-token-${reCAPTCHAToken}`,
+    expirationTime: 123
+  };
 }

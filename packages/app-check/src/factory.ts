@@ -19,7 +19,11 @@ import { FirebaseAppCheck, AppCheckProvider } from '@firebase/app-check-types';
 import { setCustomProvider, activate } from './api';
 import { FirebaseApp } from '@firebase/app-types';
 import { FirebaseAppCheckInternal } from '@firebase/app-check-interop-types';
-import { getToken } from './internal-api';
+import {
+  getToken,
+  addTokenListener,
+  removeTokenListener
+} from './internal-api';
 
 export function factory(app: FirebaseApp): FirebaseAppCheck {
   return {
@@ -32,7 +36,7 @@ export function factory(app: FirebaseApp): FirebaseAppCheck {
 export function internalFactory(app: FirebaseApp): FirebaseAppCheckInternal {
   return {
     getToken: () => getToken(app),
-    addTokenListener: () => {},
-    removeTokenListener: () => {}
+    addTokenListener: listener => addTokenListener(app, listener),
+    removeTokenListener: listener => removeTokenListener(app, listener)
   };
 }
