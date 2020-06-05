@@ -25,7 +25,7 @@ import {
 } from '../interfaces/installation-entry';
 import { PENDING_TIMEOUT_MS } from '../util/constants';
 import { ERROR_FACTORY, ErrorCode, isServerError } from '../util/errors';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import { generateFid, INVALID_FID } from './generate-fid';
 import { remove, set, update } from './idb-manager';
 

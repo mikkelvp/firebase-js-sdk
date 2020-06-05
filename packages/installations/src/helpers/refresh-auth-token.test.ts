@@ -28,7 +28,7 @@ import {
 import { getFakeDependencies } from '../testing/fake-generators';
 import '../testing/setup';
 import { TOKEN_EXPIRATION_BUFFER } from '../util/constants';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import { get, set } from './idb-manager';
 import { refreshAuthToken } from './refresh-auth-token';
 

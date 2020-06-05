@@ -28,7 +28,7 @@ import {
 import { getFakeAppConfig } from '../testing/fake-generators';
 import '../testing/setup';
 import { ERROR_FACTORY, ErrorCode } from '../util/errors';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import * as generateFidModule from './generate-fid';
 import { getInstallationEntry } from './get-installation-entry';
 import { get, set } from './idb-manager';

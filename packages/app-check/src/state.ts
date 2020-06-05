@@ -17,18 +17,24 @@
 
 import { FirebaseApp } from '@firebase/app-types';
 import { AppCheckProvider } from '@firebase/app-check-types';
-import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
+import {
+  AppCheckTokenListener,
+  AppCheckToken
+} from '@firebase/app-check-interop-types';
 
 export interface AppCheckState {
   activated: boolean;
   customProvider?: AppCheckProvider;
+  token?: AppCheckToken;
+  isProactiveRefreshingToken: boolean;
 }
 
 export const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
 export const DEFAULT_STATE: AppCheckState = {
-  activated: false
+  activated: false,
+  isProactiveRefreshingToken: false
 };
 export const APP_CHECK_LISTENERS = new Map<
   FirebaseApp,
-  AppCheckTokenListener
+  AppCheckTokenListener[]
 >();

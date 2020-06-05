@@ -41,7 +41,7 @@ export function setCustomProvider(
   }
 
   APP_CHECK_STATES.set(app, {
-    activated: false,
+    ...DEFAULT_STATE,
     customProvider: provider
   });
 }

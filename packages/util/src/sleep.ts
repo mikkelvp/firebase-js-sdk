@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2019 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,23 +15,9 @@
  * limitations under the License.
  */
 
-import { expect } from 'chai';
-import { SinonFakeTimers, useFakeTimers } from 'sinon';
-import '../testing/setup';
-import { sleep } from './sleep';
-
-describe('sleep', () => {
-  let clock: SinonFakeTimers;
-
-  beforeEach(() => {
-    clock = useFakeTimers({ shouldAdvanceTime: true });
+/** Returns a promise that resolves after given time passes. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise<void>(resolve => {
+    setTimeout(resolve, ms);
   });
-
-  it('returns a promise that resolves after a given amount of time', async () => {
-    const t0 = clock.now;
-    await sleep(100);
-    const t1 = clock.now;
-
-    expect(t1 - t0).to.equal(100);
-  });
-});
+}

@@ -15,9 +15,22 @@
  * limitations under the License.
  */
 
-/** Returns a promise that resolves after given time passes. */
-export function sleep(ms: number): Promise<void> {
-  return new Promise<void>(resolve => {
-    setTimeout(resolve, ms);
+import { expect } from 'chai';
+import { SinonFakeTimers, useFakeTimers } from 'sinon';
+import { sleep } from '../src/sleep';
+
+describe('sleep', () => {
+  let clock: SinonFakeTimers;
+
+  beforeEach(() => {
+    clock = useFakeTimers({ shouldAdvanceTime: true });
   });
-}
+
+  it('returns a promise that resolves after a given amount of time', async () => {
+    const t0 = clock.now;
+    await sleep(100);
+    const t1 = clock.now;
+
+    expect(t1 - t0).to.equal(100);
+  });
+});

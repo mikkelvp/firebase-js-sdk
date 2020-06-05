@@ -30,7 +30,7 @@ import {
 import { getFakeDependencies } from '../testing/fake-generators';
 import '../testing/setup';
 import { ErrorCode } from '../util/errors';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import { deleteInstallation } from './delete-installation';
 
 const FID = 'children-of-the-damned';

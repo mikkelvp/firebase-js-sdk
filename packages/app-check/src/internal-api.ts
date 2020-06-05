@@ -21,12 +21,21 @@ import {
   AppCheckToken,
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
-import { APP_CHECK_STATES, DEFAULT_STATE, AppCheckState } from './state';
+import {
+  APP_CHECK_STATES,
+  DEFAULT_STATE,
+  AppCheckState,
+  APP_CHECK_LISTENERS
+} from './state';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import {
   EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
   EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT
 } from './constants';
+import {
+  startProactiveRefresh,
+  isProactiveRefreshRunning
+} from './proactive-refresh';
 
 export async function getToken(
   app: FirebaseApp
@@ -34,24 +43,51 @@ export async function getToken(
   const state = APP_CHECK_STATES.get(app) || DEFAULT_STATE;
   ensureActivated(app, state);
 
+  let token;
   if (state.customProvider) {
     const attestedClaimsToken = await state.customProvider.getToken();
-    return exchangeCustomTokenForAppCheckToken(attestedClaimsToken);
+    token = await exchangeCustomTokenForAppCheckToken(attestedClaimsToken);
   } else {
     const attestedClaimsToken = await getReCAPTCHAToken(app);
-    return exchangeReCAPTCHATokenForAppCheckToken(attestedClaimsToken);
+    token = await exchangeReCAPTCHATokenForAppCheckToken(attestedClaimsToken);
   }
+
+  notifyTokenListeners(app, token);
+
+  return token;
 }
 
 export function addTokenListener(
   app: FirebaseApp,
   listener: AppCheckTokenListener
-) {}
+): void {
+  const listeners = APP_CHECK_LISTENERS.get(app) || [];
+  listeners.push(listener);
+
+  APP_CHECK_LISTENERS.set(app, listeners);
+
+  if (!isProactiveRefreshRunning(app)) {
+    startProactiveRefresh(app);
+  }
+}
 
 export function removeTokenListener(
   app: FirebaseApp,
   listener: AppCheckTokenListener
-) {}
+): void {
+  let listeners = APP_CHECK_LISTENERS.get(app) || [];
+  listeners = listeners.filter(l => l !== listener);
+
+  APP_CHECK_LISTENERS.set(app, listeners);
+}
+
+function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
+  const listeners = APP_CHECK_LISTENERS.get(app) || [];
+
+  for (const listener of listeners) {
+    listener(token);
+  }
+}
 
 function ensureActivated(app: FirebaseApp, state: AppCheckState) {
   if (!state.activated) {

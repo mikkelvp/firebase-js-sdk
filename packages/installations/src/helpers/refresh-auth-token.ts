@@ -28,7 +28,7 @@ import {
 } from '../interfaces/installation-entry';
 import { PENDING_TIMEOUT_MS, TOKEN_EXPIRATION_BUFFER } from '../util/constants';
 import { ERROR_FACTORY, ErrorCode, isServerError } from '../util/errors';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import { remove, set, update } from './idb-manager';
 
 /**

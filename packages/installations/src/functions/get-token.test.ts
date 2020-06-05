@@ -33,7 +33,7 @@ import { getFakeDependencies } from '../testing/fake-generators';
 import '../testing/setup';
 import { TOKEN_EXPIRATION_BUFFER } from '../util/constants';
 import { ERROR_FACTORY, ErrorCode } from '../util/errors';
-import { sleep } from '../util/sleep';
+import { sleep } from '@firebase/util';
 import { getToken } from './get-token';
 
 const FID = 'dont-talk-to-strangers';
