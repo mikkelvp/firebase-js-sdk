@@ -21,28 +21,21 @@ import {
   AppCheckToken,
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
-import {
-  APP_CHECK_STATES,
-  DEFAULT_STATE,
-  AppCheckState,
-  APP_CHECK_LISTENERS
-} from './state';
+import { AppCheckState, getState, setState } from './state';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import {
   EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
-  EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT
+  EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT,
+  TOKEN_REFRESH_TIME
 } from './constants';
-import {
-  startProactiveRefresh,
-  isProactiveRefreshRunning
-} from './proactive-refresh';
+import { Refresher } from './proactive-refresh';
 
 export async function getToken(
   app: FirebaseApp
 ): Promise<AppCheckToken | null> {
-  const state = APP_CHECK_STATES.get(app) || DEFAULT_STATE;
-  ensureActivated(app, state);
+  ensureActivated(app);
 
+  const state = getState(app);
   let token;
   if (state.customProvider) {
     const attestedClaimsToken = await state.customProvider.getToken();
@@ -61,36 +54,78 @@ export function addTokenListener(
   app: FirebaseApp,
   listener: AppCheckTokenListener
 ): void {
-  const listeners = APP_CHECK_LISTENERS.get(app) || [];
-  listeners.push(listener);
+  const state = getState(app);
+  let newState = {
+    ...state,
+    tokenListeners: [...state.tokenListeners, listener]
+  };
 
-  APP_CHECK_LISTENERS.set(app, listeners);
-
-  if (!isProactiveRefreshRunning(app)) {
-    startProactiveRefresh(app);
+  if (!newState.tokenRefresher) {
+    const tokenRefresher = createTokenRefresher(app);
+    newState.tokenRefresher = tokenRefresher;
   }
+
+  if (!newState.tokenRefresher.isRunning()) {
+    newState.tokenRefresher.start();
+  }
+
+  setState(app, newState);
 }
 
 export function removeTokenListener(
   app: FirebaseApp,
   listener: AppCheckTokenListener
 ): void {
-  let listeners = APP_CHECK_LISTENERS.get(app) || [];
-  listeners = listeners.filter(l => l !== listener);
+  const state = getState(app);
 
-  APP_CHECK_LISTENERS.set(app, listeners);
+  const newListeners = state.tokenListeners.filter(l => l !== listener);
+  if (newListeners.length === 0 && state.tokenRefresher?.isRunning()) {
+    state.tokenRefresher?.stop();
+  }
+
+  setState(app, {
+    ...state,
+    tokenListeners: newListeners
+  });
+}
+
+function createTokenRefresher(app: FirebaseApp): Refresher {
+  return new Refresher(
+    // Keep in mind when this fails for any reason other than the ones
+    // for which we should retry, it will effectively stop the proactive refresh.
+    () => getToken(app),
+    () => {
+      // TODO: when should we retry?
+      return true;
+    },
+    () => {
+      const state = getState(app);
+
+      if (state?.token) {
+        return (
+          state.token.expirationTime -
+          Date.now() -
+          TOKEN_REFRESH_TIME.OFFSET_DURATION
+        );
+      } else {
+        return 0;
+      }
+    },
+    TOKEN_REFRESH_TIME.RETRIAL_MIN_WAIT,
+    TOKEN_REFRESH_TIME.RETRIAL_MAX_WAIT
+  );
 }
 
 function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
-  const listeners = APP_CHECK_LISTENERS.get(app) || [];
+  const listeners = getState(app).tokenListeners;
 
   for (const listener of listeners) {
     listener(token);
   }
 }
 
-function ensureActivated(app: FirebaseApp, state: AppCheckState) {
-  if (!state.activated) {
+function ensureActivated(app: FirebaseApp) {
+  if (!getState(app).activated) {
     throw ERROR_FACTORY.create(AppCheckError.USE_BEFORE_ACTIVATION, {
       name: app.name
     });

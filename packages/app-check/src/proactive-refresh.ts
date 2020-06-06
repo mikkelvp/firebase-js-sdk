@@ -15,56 +15,89 @@
  * limitations under the License.
  */
 
-import { FirebaseApp } from '@firebase/app-types';
-import { APP_CHECK_STATES, DEFAULT_STATE } from './state';
-import { Deferred } from '@firebase/util';
-
-export function startProactiveRefresh(app: FirebaseApp): void {}
-
-export function stopProactiveRefresh(app: FirebaseApp): void {}
-
-export function isProactiveRefreshRunning(app: FirebaseApp): boolean {
-  const state = APP_CHECK_STATES.get(app) || DEFAULT_STATE;
-  return state.isProactiveRefreshingToken;
-}
+import { Deferred, sleep } from '@firebase/util';
 
 /**
  * Port from auth proactiverefresh.js
  *
  */
 // TODO: move it to @firebase/util?
+// TODO: Being able to config whether refresh should happen in the background
 export class Refresher {
-  private pendingChain: Deferred<unknown>[] | null = null;
+  private pending: Deferred<unknown> | null = null;
+  private nextErrorWaitInterval: number;
   constructor(
     private readonly operation: () => Promise<unknown>,
-    private readonly retryPolicy: () => boolean,
+    private readonly retryPolicy: (error: Error) => boolean,
     private readonly getWaitDuration: () => number,
     private readonly lowerBound: number,
     private readonly upperBound: number
-  ) {}
+  ) {
+    this.nextErrorWaitInterval = lowerBound;
+  }
 
   start() {
-    this.process();
-
-    const deferred = new Deferred();
-    if (!this.pendingChain) {
-      this.pendingChain = [];
-    }
-    this.pendingChain.push(deferred);
-
-    setTimeout(() => {});
+    this.nextErrorWaitInterval = this.lowerBound;
+    this.process(true);
   }
 
   stop() {
-    if (this.pendingChain) {
-      for (const deferred of this.pendingChain) {
-        deferred.reject('cancelled');
-      }
-      this.pendingChain = null;
+    if (this.pending) {
+      this.pending.reject('cancelled');
+      this.pending = null;
     }
   }
 
-  process() {
+  isRunning(): boolean {
+    return !!this.pending;
+  }
+
+  private async process(hasSucceeded: boolean) {
     this.stop();
+
+    try {
+      this.pending = new Deferred();
+      await sleep(this.getNextRun(hasSucceeded));
+
+      // Why do we resolve a promise, then immediate wait for it?
+      // It is to make the promise chain cancellable.
+      // We could call stop() before the following line execute, which makes the following line a no-op,
+      // and we jump to the catch block.
+      // TODO: unit test this
+      this.pending.resolve();
+      await this.pending.promise;
+
+      this.pending = new Deferred();
+      await this.operation();
+
+      this.pending.resolve();
+      await this.pending.promise;
+
+      this.process(true);
+    } catch (error) {
+      if (this.retryPolicy(error)) {
+        this.process(false);
+      }
+    }
+  }
+
+  private getNextRun(hasSucceeded: boolean): number {
+    if (hasSucceeded) {
+      // If last operation succeeded, reset next error wait interval and return
+      // the default wait duration.
+      this.nextErrorWaitInterval = this.lowerBound;
+      // Return typical wait duration interval after a successful operation.
+      return this.getWaitDuration();
+    } else {
+      // Get next error wait interval.
+      const currentErrorWaitInterval = this.nextErrorWaitInterval;
+      // Double interval for next consecutive error.
+      this.nextErrorWaitInterval *= 2;
+      // Make sure next wait interval does not exceed the maximum upper bound.
+      if (this.nextErrorWaitInterval > this.upperBound) {
+        this.nextErrorWaitInterval = this.upperBound;
+      }
+      return currentErrorWaitInterval;
+    }
   }
 }

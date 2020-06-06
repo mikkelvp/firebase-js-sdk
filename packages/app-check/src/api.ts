@@ -19,13 +19,13 @@ import { AppCheckProvider } from '@firebase/app-check-types';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import { initialize as initializeRecaptcha } from './recaptcha';
-import { APP_CHECK_STATES, DEFAULT_STATE } from './state';
+import { DEFAULT_STATE, getState, setState } from './state';
 
 export function setCustomProvider(
   app: FirebaseApp,
   provider: AppCheckProvider
 ): void {
-  const state = APP_CHECK_STATES.get(app);
+  const state = getState(app);
   if (state) {
     if (state.activated) {
       throw ERROR_FACTORY.create(AppCheckError.SET_PROVIDER_AFTER_ACTIVATED, {
@@ -40,24 +40,24 @@ export function setCustomProvider(
     }
   }
 
-  APP_CHECK_STATES.set(app, {
+  setState(app, {
     ...DEFAULT_STATE,
     customProvider: provider
   });
 }
 
 export function activate(app: FirebaseApp): void {
-  const state = APP_CHECK_STATES.get(app) || DEFAULT_STATE;
+  const state = getState(app);
   if (state.activated) {
     throw ERROR_FACTORY.create(AppCheckError.ALREADY_ACTIVATED, {
       name: app.name
     });
   }
 
-  APP_CHECK_STATES.set(app, { ...state, activated: true });
-
   if (!state.customProvider) {
     // initialize ReCAPTCHA
     initializeRecaptcha(app);
   }
+
+  setState(app, { ...state, activated: true });
 }

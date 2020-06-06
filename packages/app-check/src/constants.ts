@@ -17,3 +17,19 @@
 
 export const EXCHANGE_CUSTOM_TOKEN_ENDPOINT = '';
 export const EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT = '';
+export const TOKEN_REFRESH_TIME = {
+  /**
+   * The offset time before token natural expiration to run the refresh.
+   * This is currently 5 minutes.
+   */
+  OFFSET_DURATION: 5 * 60 * 1000,
+  /**
+   * This is the first retrial wait after an error. This is currently
+   * 30 seconds.
+   */
+  RETRIAL_MIN_WAIT: 30 * 1000,
+  /**
+   * This is the maximum retrial wait, currently 16 minutes.
+   */
+  RETRIAL_MAX_WAIT: 16 * 60 * 1000
+};

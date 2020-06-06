@@ -21,20 +21,26 @@ import {
   AppCheckTokenListener,
   AppCheckToken
 } from '@firebase/app-check-interop-types';
+import { Refresher } from './proactive-refresh';
 
 export interface AppCheckState {
   activated: boolean;
+  tokenListeners: AppCheckTokenListener[];
   customProvider?: AppCheckProvider;
   token?: AppCheckToken;
-  isProactiveRefreshingToken: boolean;
+  tokenRefresher?: Refresher;
 }
 
 export const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
 export const DEFAULT_STATE: AppCheckState = {
   activated: false,
-  isProactiveRefreshingToken: false
+  tokenListeners: []
 };
-export const APP_CHECK_LISTENERS = new Map<
-  FirebaseApp,
-  AppCheckTokenListener[]
->();
+
+export function getState(app: FirebaseApp): AppCheckState {
+  return APP_CHECK_STATES.get(app) || DEFAULT_STATE;
+}
+
+export function setState(app: FirebaseApp, state: AppCheckState): void {
+  APP_CHECK_STATES.set(app, state);
+}
