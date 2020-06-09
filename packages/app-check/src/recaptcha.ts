@@ -16,21 +16,46 @@
  */
 
 import { FirebaseApp } from '@firebase/app-types';
+import { getState, setState } from './state';
 import { Deferred } from '@firebase/util';
 
 const RECAPTCHA_URL = 'https://www.google.com/recaptcha/api.js';
 
-export const initialized = new Deferred<void>();
+export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
+  const state = getState(app);
+  const initialized = new Deferred<GreCAPTCHA>();
 
-export function initialize(app: FirebaseApp): Promise<void> {
-  // TODO: update FirebaseApp option and confirm with FireData on the name of the field
-  const { siteKey } = app.options as any;
-  const script = document.createElement('script');
-  script.src = `${RECAPTCHA_URL}?render=${siteKey}`;
-  script.onload = () => {
-    initialized.resolve();
-  };
-  document.head.appendChild(script);
+  setState(app, { ...state, reCAPTCHAState: { initialized } });
+
+  const divId = `fire_app_check_${app.name}`;
+  const invisibleDiv = document.createElement('div');
+  invisibleDiv.id = divId;
+  invisibleDiv.style.display = 'none';
+
+  document.body.appendChild(invisibleDiv);
+
+  let grecaptcha = getRecaptcha();
+  if (!grecaptcha) {
+    loadReCAPTCHAScript(() => {
+      const grecaptcha = getRecaptcha();
+
+      if (!grecaptcha) {
+        // it shouldn't happen.
+        throw new Error('no recaptcha');
+      }
+
+      grecaptcha.ready(() => {
+        // Invisible widgets allow us to set a different siteKey for each widget, so we use them to can support multiple apps
+        renderInvisibleWidget(app, divId);
+        initialized.resolve(grecaptcha);
+      });
+    });
+  } else {
+    grecaptcha.ready(() => {
+      renderInvisibleWidget(app, divId);
+      initialized.resolve(grecaptcha);
+    });
+  }
 
   return initialized.promise;
 }
@@ -40,24 +65,59 @@ export function getRecaptcha(): GreCAPTCHA | undefined {
 }
 
 export async function getToken(app: FirebaseApp): Promise<string> {
-  await initialized.promise;
-  const recaptcha = getRecaptcha();
+  const reCAPTCHAState = getState(app).reCAPTCHAState;
 
-  // TODO: could it really happen?
-  if (!recaptcha) {
-    throw Error('reCAPTCHA is not available');
+  // it shouldn't happen
+  if (!reCAPTCHAState) {
+    throw Error(`App Check has not been activated for ${app.name}`);
   }
+
+  const recaptcha = await reCAPTCHAState.initialized.promise;
 
   return new Promise((resolve, reject) => {
     recaptcha.ready(() => {
-      // TODO: update app.options and confirm the official name for siteKey
       resolve(
-        recaptcha.execute((app.options as any).siteKey, {
+        // widgetId is guaranteed to be available if reCAPTCHAState.initialized.promise resolved.
+        recaptcha.execute(reCAPTCHAState.widgetId!, {
           action: 'fire_app_check'
         })
       );
     });
   });
+}
+
+/**
+ *
+ * @param app
+ * @param container - Id of a HTML element.
+ */
+function renderInvisibleWidget(app: FirebaseApp, container: string): void {
+  const grecaptcha = getRecaptcha();
+
+  // it shouldn't happen.
+  if (!grecaptcha) {
+    throw new Error('no recaptcha');
+  }
+
+  const widgetId = grecaptcha.render(container, {
+    // TODO: confirm how we get siteKey.
+    // Should we retrieve it dynamically? probably not, since it will add significant latency
+    sitekey: (app.options as any).siteKey,
+    size: 'invisible'
+  });
+
+  const state = getState(app);
+  // state.reCAPTCHAState is set in the beginning of the function
+  state.reCAPTCHAState!.widgetId = widgetId;
+
+  setState(app, state);
+}
+
+function loadReCAPTCHAScript(onload: () => void) {
+  const script = document.createElement('script');
+  script.src = `${RECAPTCHA_URL}`;
+  script.onload = onload;
+  document.head.appendChild(script);
 }
 
 declare global {
@@ -69,4 +129,13 @@ declare global {
 export interface GreCAPTCHA {
   ready: (callback: Function) => void;
   execute: (siteKey: string, options: { action: string }) => Promise<string>;
+  render: (
+    container: string | HTMLElement,
+    parameters: GreCAPTCHARenderOption
+  ) => string;
+}
+
+export interface GreCAPTCHARenderOption {
+  sitekey: string;
+  size: 'invisible';
 }

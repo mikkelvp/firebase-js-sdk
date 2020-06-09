@@ -54,10 +54,10 @@ export function activate(app: FirebaseApp): void {
     });
   }
 
+  setState(app, { ...state, activated: true });
+
   if (!state.customProvider) {
     // initialize ReCAPTCHA
     initializeRecaptcha(app);
   }
-
-  setState(app, { ...state, activated: true });
 }

@@ -21,7 +21,7 @@ import {
   AppCheckToken,
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
-import { AppCheckState, getState, setState } from './state';
+import { getState, setState } from './state';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import {
   EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
@@ -120,7 +120,11 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
   const listeners = getState(app).tokenListeners;
 
   for (const listener of listeners) {
-    listener(token);
+    try {
+      listener(token);
+    } catch (e) {
+      // If any handler fails, ignore and run next handler.
+    }
   }
 }
 

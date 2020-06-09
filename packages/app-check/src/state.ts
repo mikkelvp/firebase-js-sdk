@@ -22,6 +22,8 @@ import {
   AppCheckToken
 } from '@firebase/app-check-interop-types';
 import { Refresher } from './proactive-refresh';
+import { Deferred } from '@firebase/util';
+import { GreCAPTCHA } from './recaptcha';
 
 export interface AppCheckState {
   activated: boolean;
@@ -29,6 +31,12 @@ export interface AppCheckState {
   customProvider?: AppCheckProvider;
   token?: AppCheckToken;
   tokenRefresher?: Refresher;
+  reCAPTCHAState?: ReCAPTCHAState;
+}
+
+export interface ReCAPTCHAState {
+  initialized: Deferred<GreCAPTCHA>;
+  widgetId?: string;
 }
 
 export const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
