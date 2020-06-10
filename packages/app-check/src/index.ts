@@ -59,10 +59,10 @@ registerAppCheck(firebase as _FirebaseNamespace);
 declare module '@firebase/app-types' {
   interface FirebaseNamespace {
     appCheck(app?: FirebaseApp): FirebaseAppCheck;
-    appCheckInternal(): FirebaseAppCheckInternal;
+    //  appCheckInternal(): FirebaseAppCheckInternal;
   }
   interface FirebaseApp {
     appCheck(): FirebaseAppCheck;
-    appCheckInternal(): FirebaseAppCheckInternal;
+    // appCheckInternal(): FirebaseAppCheckInternal;
   }
 }
