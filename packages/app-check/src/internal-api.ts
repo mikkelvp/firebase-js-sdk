@@ -131,10 +131,11 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
 function ensureActivated(app: FirebaseApp) {
   if (!getState(app).activated) {
     throw ERROR_FACTORY.create(AppCheckError.USE_BEFORE_ACTIVATION, {
-      name: app.name
+      appName: app.name
     });
   }
 }
+
 // TODO: integrate with the actual backend to get the AppCheckToken
 async function exchangeCustomTokenForAppCheckToken(
   customToken: string

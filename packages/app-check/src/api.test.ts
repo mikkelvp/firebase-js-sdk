@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+import '../test/setup';
 import { expect } from 'chai';
 import { setCustomProvider, activate } from './api';
 import { getFakeApp, getFakeCustomTokenProvider } from '../test/util';

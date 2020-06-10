@@ -29,13 +29,13 @@ export function setCustomProvider(
   if (state) {
     if (state.activated) {
       throw ERROR_FACTORY.create(AppCheckError.SET_PROVIDER_AFTER_ACTIVATED, {
-        name: app.name
+        appName: app.name
       });
     }
 
     if (state.customProvider) {
       throw ERROR_FACTORY.create(AppCheckError.PROVIDER_ALREADY_SET, {
-        name: app.name
+        appName: app.name
       });
     }
   }
@@ -50,7 +50,7 @@ export function activate(app: FirebaseApp): void {
   const state = getState(app);
   if (state.activated) {
     throw ERROR_FACTORY.create(AppCheckError.ALREADY_ACTIVATED, {
-      name: app.name
+      appName: app.name
     });
   }
 

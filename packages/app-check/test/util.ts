@@ -40,6 +40,6 @@ export function getFakeApp(): FirebaseApp {
 
 export function getFakeCustomTokenProvider(): AppCheckProvider {
   return {
-    getToken: () => Promise.resolve('token')
+    getToken: () => Promise.resolve('fake-custom-token')
   };
 }
