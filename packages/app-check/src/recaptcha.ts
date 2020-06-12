@@ -18,8 +18,9 @@
 import { FirebaseApp } from '@firebase/app-types';
 import { getState, setState } from './state';
 import { Deferred } from '@firebase/util';
+import { getRecaptcha } from './util';
 
-const RECAPTCHA_URL = 'https://www.google.com/recaptcha/api.js';
+export const RECAPTCHA_URL = 'https://www.google.com/recaptcha/api.js';
 
 export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
   const state = getState(app);
@@ -43,7 +44,6 @@ export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
         // it shouldn't happen.
         throw new Error('no recaptcha');
       }
-
       grecaptcha.ready(() => {
         // Invisible widgets allow us to set a different siteKey for each widget, so we use them to can support multiple apps
         renderInvisibleWidget(app, divId);
@@ -58,10 +58,6 @@ export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
   }
 
   return initialized.promise;
-}
-
-export function getRecaptcha(): GreCAPTCHA | undefined {
-  return self.grecaptcha;
 }
 
 export async function getToken(app: FirebaseApp): Promise<string> {
@@ -98,7 +94,6 @@ function renderInvisibleWidget(app: FirebaseApp, container: string): void {
   if (!grecaptcha) {
     throw new Error('no recaptcha');
   }
-
   const widgetId = grecaptcha.render(container, {
     // TODO: confirm how we get siteKey.
     // Should we retrieve it dynamically? probably not, since it will add significant latency

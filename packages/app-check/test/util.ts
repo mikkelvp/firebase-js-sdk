@@ -17,6 +17,7 @@
 
 import { FirebaseApp } from '@firebase/app-types';
 import { AppCheckProvider } from '@firebase/app-check-types';
+import { GreCAPTCHA } from '../src/recaptcha';
 
 export function getFakeApp(): FirebaseApp {
   return {
@@ -28,8 +29,9 @@ export function getFakeApp(): FirebaseApp {
       messagingSenderId: 'messagingSenderId',
       databaseURL: 'databaseUrl',
       storageBucket: 'storageBucket',
-      appId: '1:777777777777:web:d93b5ca1475efe57'
-    },
+      appId: '1:777777777777:web:d93b5ca1475efe57',
+      siteKey: 'test_site_key'
+    } as any,
     automaticDataCollectionEnabled: true,
     delete: async () => {},
     // This won't be used in tests.
@@ -41,5 +43,13 @@ export function getFakeApp(): FirebaseApp {
 export function getFakeCustomTokenProvider(): AppCheckProvider {
   return {
     getToken: () => Promise.resolve('fake-custom-token')
+  };
+}
+
+export function getFakeGreCAPTCHA(): GreCAPTCHA {
+  return {
+    ready: callback => callback(),
+    render: (container, parameters) => 'fake_widget_1',
+    execute: (siteKey, options) => Promise.resolve('fake_recaptcha_token')
   };
 }
