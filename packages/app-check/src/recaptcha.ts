@@ -35,7 +35,7 @@ export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
 
   document.body.appendChild(invisibleDiv);
 
-  let grecaptcha = getRecaptcha();
+  const grecaptcha = getRecaptcha();
   if (!grecaptcha) {
     loadReCAPTCHAScript(() => {
       const grecaptcha = getRecaptcha();
@@ -70,7 +70,7 @@ export async function getToken(app: FirebaseApp): Promise<string> {
 
   const recaptcha = await reCAPTCHAState.initialized.promise;
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     recaptcha.ready(() => {
       resolve(
         // widgetId is guaranteed to be available if reCAPTCHAState.initialized.promise resolved.
@@ -97,6 +97,7 @@ function renderInvisibleWidget(app: FirebaseApp, container: string): void {
   const widgetId = grecaptcha.render(container, {
     // TODO: confirm how we get siteKey.
     // Should we retrieve it dynamically? probably not, since it will add significant latency
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     sitekey: (app.options as any).siteKey,
     size: 'invisible'
   });
@@ -108,7 +109,7 @@ function renderInvisibleWidget(app: FirebaseApp, container: string): void {
   setState(app, state);
 }
 
-function loadReCAPTCHAScript(onload: () => void) {
+function loadReCAPTCHAScript(onload: () => void): void {
   const script = document.createElement('script');
   script.src = `${RECAPTCHA_URL}`;
   script.onload = onload;

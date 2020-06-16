@@ -43,6 +43,8 @@ export function activate(app: FirebaseApp, provider?: AppCheckProvider): void {
 
   // initialize reCAPTCHA if no custom token provider is provided
   if (!provider) {
-    initializeRecaptcha(app);
+    initializeRecaptcha(app).catch(() => {
+      /* we don't care about the initialization result in activate() */
+    });
   }
 }

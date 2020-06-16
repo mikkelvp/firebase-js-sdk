@@ -19,7 +19,6 @@ import { _FirebaseNamespace } from '@firebase/app-types/private';
 import { Component, ComponentType } from '@firebase/component';
 import { FirebaseAppCheck } from '@firebase/app-check-types';
 import { factory, internalFactory } from './factory';
-import { FirebaseAppCheckInternal } from '@firebase/app-check-interop-types';
 
 const APP_CHECK_NAME = 'appCheck';
 const APP_CHECK_NAME_INTERNAL = 'appCheckInternal';

@@ -36,12 +36,14 @@ export class Refresher {
     this.nextErrorWaitInterval = lowerBound;
   }
 
-  start() {
+  start(): void {
     this.nextErrorWaitInterval = this.lowerBound;
-    this.process(true);
+    this.process(true).catch(() => {
+      /* we don't care about the result */
+    });
   }
 
-  stop() {
+  stop(): void {
     if (this.pending) {
       this.pending.reject('cancelled');
       this.pending = null;
@@ -52,7 +54,7 @@ export class Refresher {
     return !!this.pending;
   }
 
-  private async process(hasSucceeded: boolean) {
+  private async process(hasSucceeded: boolean): Promise<void> {
     this.stop();
 
     try {
@@ -73,10 +75,14 @@ export class Refresher {
       this.pending.resolve();
       await this.pending.promise;
 
-      this.process(true);
+      this.process(true).catch(() => {
+        /* we don't care about the result */
+      });
     } catch (error) {
       if (this.retryPolicy(error)) {
-        this.process(false);
+        this.process(false).catch(() => {
+          /* we don't care about the result */
+        });
       }
     }
   }

@@ -49,7 +49,7 @@ export function getFakeCustomTokenProvider(): AppCheckProvider {
 export function getFakeGreCAPTCHA(): GreCAPTCHA {
   return {
     ready: callback => callback(),
-    render: (container, parameters) => 'fake_widget_1',
-    execute: (siteKey, options) => Promise.resolve('fake_recaptcha_token')
+    render: (_container, _parameters) => 'fake_widget_1',
+    execute: (_siteKey, _options) => Promise.resolve('fake_recaptcha_token')
   };
 }

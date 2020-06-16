@@ -21,10 +21,11 @@ import { activate } from './api';
 import { getFakeApp, getFakeCustomTokenProvider } from '../test/util';
 import { getState } from './state';
 import * as reCAPTCHA from './recaptcha';
+import { FirebaseApp } from '@firebase/app-types';
 
 describe('api', () => {
   describe('activate()', () => {
-    let app;
+    let app: FirebaseApp;
 
     beforeEach(() => {
       app = getFakeApp();

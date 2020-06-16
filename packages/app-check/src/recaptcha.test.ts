@@ -96,7 +96,7 @@ function findgreCAPTCHAScriptsOnPage(): HTMLScriptElement[] {
   return tags;
 }
 
-function removegreCAPTCHAScriptsOnPage() {
+function removegreCAPTCHAScriptsOnPage(): void {
   const tags = findgreCAPTCHAScriptsOnPage();
 
   for (const tag of tags) {

@@ -38,7 +38,7 @@ describe('internal api', () => {
   // TODO: test error conditions
   describe('getToken()', () => {
     it('uses custom token to exchange for AppCheck token if customTokenProvider is provided', async () => {
-      let customTokenProvider = getFakeCustomTokenProvider();
+      const customTokenProvider = getFakeCustomTokenProvider();
 
       const customProviderSpy = spy(customTokenProvider, 'getToken');
       activate(app, customTokenProvider);
@@ -95,7 +95,7 @@ describe('internal api', () => {
       stub(reCAPTCHA, 'getToken').returns(
         Promise.resolve('fake-recaptcha-token')
       );
-      const listener1 = () => {
+      const listener1 = (): void => {
         throw new Error();
       };
       const listener2 = spy();
@@ -114,7 +114,7 @@ describe('internal api', () => {
 
   describe('addTokenListener', () => {
     it('adds token listeners', () => {
-      const listener = () => {};
+      const listener = (): void => {};
 
       addTokenListener(app, listener);
 
@@ -122,7 +122,7 @@ describe('internal api', () => {
     });
 
     it('starts proactively refreshing token after adding the first listener', () => {
-      const listener = () => {};
+      const listener = (): void => {};
       expect(getState(app).tokenListeners.length).to.equal(0);
       expect(getState(app).tokenRefresher).to.equal(undefined);
 
@@ -134,7 +134,7 @@ describe('internal api', () => {
 
   describe('removeTokenListener', () => {
     it('should remove token listeners', () => {
-      const listener = () => {};
+      const listener = (): void => {};
       addTokenListener(app, listener);
       expect(getState(app).tokenListeners.length).to.equal(1);
 
@@ -143,7 +143,7 @@ describe('internal api', () => {
     });
 
     it('should stop proactively refreshing token after deleting the last listener', () => {
-      const listener = () => {};
+      const listener = (): void => {};
 
       addTokenListener(app, listener);
       expect(getState(app).tokenListeners.length).to.equal(1);

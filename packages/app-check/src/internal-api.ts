@@ -55,7 +55,7 @@ export function addTokenListener(
   listener: AppCheckTokenListener
 ): void {
   const state = getState(app);
-  let newState = {
+  const newState = {
     ...state,
     tokenListeners: [...state.tokenListeners, listener]
   };
@@ -79,8 +79,12 @@ export function removeTokenListener(
   const state = getState(app);
 
   const newListeners = state.tokenListeners.filter(l => l !== listener);
-  if (newListeners.length === 0 && state.tokenRefresher?.isRunning()) {
-    state.tokenRefresher?.stop();
+  if (
+    newListeners.length === 0 &&
+    state.tokenRefresher &&
+    state.tokenRefresher.isRunning()
+  ) {
+    state.tokenRefresher.stop();
   }
 
   setState(app, {
@@ -128,7 +132,7 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
   }
 }
 
-function ensureActivated(app: FirebaseApp) {
+function ensureActivated(app: FirebaseApp): void {
   if (!getState(app).activated) {
     throw ERROR_FACTORY.create(AppCheckError.USE_BEFORE_ACTIVATION, {
       appName: app.name
@@ -140,7 +144,7 @@ function ensureActivated(app: FirebaseApp) {
 async function exchangeCustomTokenForAppCheckToken(
   customToken: string
 ): Promise<AppCheckToken> {
-  const endpoint = EXCHANGE_CUSTOM_TOKEN_ENDPOINT;
+  const _endpoint = EXCHANGE_CUSTOM_TOKEN_ENDPOINT;
   return {
     token: `fake-app-check-token-${customToken}`,
     expirationTime: 123
@@ -150,7 +154,7 @@ async function exchangeCustomTokenForAppCheckToken(
 async function exchangeReCAPTCHATokenForAppCheckToken(
   reCAPTCHAToken: string
 ): Promise<AppCheckToken> {
-  const endpoint = EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT;
+  const _endpoint = EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT;
   return {
     token: `fake-app-check-token-${reCAPTCHAToken}`,
     expirationTime: 123
