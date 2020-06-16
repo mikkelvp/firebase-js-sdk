@@ -17,14 +17,10 @@
 
 export interface FirebaseAppCheck {
   /**
-   * Provide a custom attestation provider implementation
-   */
-  setCustomProvider(provider: AppCheckProvider): void;
-
-  /**
    * Activate AppCheck
+   * @param provider - optional custom token provider
    */
-  activate(): void;
+  activate(provider?: AppCheckProvider): void;
 }
 
 interface AppCheckProvider {

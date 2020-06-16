@@ -20,7 +20,7 @@ import { expect } from 'chai';
 import { spy, stub } from 'sinon';
 import { FirebaseApp } from '@firebase/app-types';
 import { getFakeApp, getFakeCustomTokenProvider } from '../test/util';
-import { setCustomProvider, activate } from './api';
+import { activate } from './api';
 import {
   getToken,
   addTokenListener,
@@ -41,8 +41,7 @@ describe('internal api', () => {
       let customTokenProvider = getFakeCustomTokenProvider();
 
       const customProviderSpy = spy(customTokenProvider, 'getToken');
-      setCustomProvider(app, customTokenProvider);
-      activate(app);
+      activate(app, customTokenProvider);
 
       const token = await getToken(app);
 

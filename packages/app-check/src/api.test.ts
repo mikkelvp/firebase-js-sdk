@@ -16,55 +16,39 @@
  */
 import '../test/setup';
 import { expect } from 'chai';
-import { setCustomProvider, activate } from './api';
+import { stub } from 'sinon';
+import { activate } from './api';
 import { getFakeApp, getFakeCustomTokenProvider } from '../test/util';
 import { getState } from './state';
+import * as reCAPTCHA from './recaptcha';
 
 describe('api', () => {
-  describe('setCustomProvider()', () => {
-    it('sets custom provider correctly', () => {
-      const app = getFakeApp();
-      const customTokenProvider = getFakeCustomTokenProvider();
-      setCustomProvider(app, customTokenProvider);
-
-      expect(getState(app).customProvider).to.equal(customTokenProvider);
-    });
-
-    it('can not be called after calling activate()', () => {
-      const app = getFakeApp();
-      activate(app);
-
-      expect(() =>
-        setCustomProvider(app, getFakeCustomTokenProvider())
-      ).to.throw(
-        /You can't set customProvider on an activated AppCheck instance/
-      );
-    });
-
-    it('can only be called once', () => {
-      const app = getFakeApp();
-      setCustomProvider(app, getFakeCustomTokenProvider());
-
-      expect(() =>
-        setCustomProvider(app, getFakeCustomTokenProvider())
-      ).to.throw(/customProvider can only be set once/);
-    });
-  });
-
   describe('activate()', () => {
+    let app;
+
+    beforeEach(() => {
+      app = getFakeApp();
+    });
+
     it('sets activated to true', () => {
-      const app = getFakeApp();
       expect(getState(app).activated).to.equal(false);
       activate(app);
       expect(getState(app).activated).to.equal(true);
     });
 
     it('can only be called once', () => {
-      const app = getFakeApp();
       activate(app);
       expect(() => activate(app)).to.throw(
         /AppCheck can only be activated once/
       );
+    });
+
+    it('does NOT initialize reCAPTCHA when a custom token provider is provided', () => {
+      const fakeCustomTokenProvider = getFakeCustomTokenProvider();
+      const initReCAPTCHAStub = stub(reCAPTCHA, 'initialize');
+      activate(app, fakeCustomTokenProvider);
+      expect(getState(app).customProvider).to.equal(fakeCustomTokenProvider);
+      expect(initReCAPTCHAStub).to.have.not.been.called;
     });
   });
 });

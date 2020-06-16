@@ -19,34 +19,14 @@ import { AppCheckProvider } from '@firebase/app-check-types';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import { initialize as initializeRecaptcha } from './recaptcha';
-import { DEFAULT_STATE, getState, setState } from './state';
+import { getState, setState, AppCheckState } from './state';
 
-export function setCustomProvider(
-  app: FirebaseApp,
-  provider: AppCheckProvider
-): void {
-  const state = getState(app);
-  if (state) {
-    if (state.activated) {
-      throw ERROR_FACTORY.create(AppCheckError.SET_PROVIDER_AFTER_ACTIVATED, {
-        appName: app.name
-      });
-    }
-
-    if (state.customProvider) {
-      throw ERROR_FACTORY.create(AppCheckError.PROVIDER_ALREADY_SET, {
-        appName: app.name
-      });
-    }
-  }
-
-  setState(app, {
-    ...DEFAULT_STATE,
-    customProvider: provider
-  });
-}
-
-export function activate(app: FirebaseApp): void {
+/**
+ *
+ * @param app
+ * @param provider - optional custom attestation provider
+ */
+export function activate(app: FirebaseApp, provider?: AppCheckProvider): void {
   const state = getState(app);
   if (state.activated) {
     throw ERROR_FACTORY.create(AppCheckError.ALREADY_ACTIVATED, {
@@ -54,10 +34,15 @@ export function activate(app: FirebaseApp): void {
     });
   }
 
-  setState(app, { ...state, activated: true });
+  const newState: AppCheckState = { ...state, activated: true };
+  if (provider) {
+    newState.customProvider = provider;
+  }
 
-  if (!state.customProvider) {
-    // initialize ReCAPTCHA
+  setState(app, newState);
+
+  // initialize reCAPTCHA if no custom token provider is provided
+  if (!provider) {
     initializeRecaptcha(app);
   }
 }

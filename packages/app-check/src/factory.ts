@@ -16,7 +16,7 @@
  */
 
 import { FirebaseAppCheck, AppCheckProvider } from '@firebase/app-check-types';
-import { setCustomProvider, activate } from './api';
+import { activate } from './api';
 import { FirebaseApp } from '@firebase/app-types';
 import { FirebaseAppCheckInternal } from '@firebase/app-check-interop-types';
 import {
@@ -27,9 +27,7 @@ import {
 
 export function factory(app: FirebaseApp): FirebaseAppCheck {
   return {
-    setCustomProvider: (customProvider: AppCheckProvider) =>
-      setCustomProvider(app, customProvider),
-    activate: () => activate(app)
+    activate: (provider: AppCheckProvider) => activate(app, provider)
   };
 }
 
