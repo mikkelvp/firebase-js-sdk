@@ -22,7 +22,7 @@ import { Deferred, sleep } from '@firebase/util';
  *
  */
 // TODO: move it to @firebase/util?
-// TODO: Being able to config whether refresh should happen in the background
+// TODO: allow to config whether refresh should happen in the background
 export class Refresher {
   private pending: Deferred<unknown> | null = null;
   private nextErrorWaitInterval: number;
@@ -62,9 +62,9 @@ export class Refresher {
       await sleep(this.getNextRun(hasSucceeded));
 
       // Why do we resolve a promise, then immediate wait for it?
-      // It is to make the promise chain cancellable.
-      // We could call stop() before the following line execute, which makes the following line a no-op,
-      // and we jump to the catch block.
+      // We do it in order to make the promise chain cancellable.
+      // We could call stop() which rejects the promise before the following line execute, which makes
+      // the code jump to the catch block.
       // TODO: unit test this
       this.pending.resolve();
       await this.pending.promise;
