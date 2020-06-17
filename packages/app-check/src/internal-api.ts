@@ -22,13 +22,13 @@ import {
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
 import { getState, setState } from './state';
-import { ERROR_FACTORY, AppCheckError } from './errors';
 import {
   EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
   EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT,
   TOKEN_REFRESH_TIME
 } from './constants';
 import { Refresher } from './proactive-refresh';
+import { ensureActivated } from './util';
 
 export async function getToken(
   app: FirebaseApp
@@ -129,14 +129,6 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
     } catch (e) {
       // If any handler fails, ignore and run next handler.
     }
-  }
-}
-
-function ensureActivated(app: FirebaseApp): void {
-  if (!getState(app).activated) {
-    throw ERROR_FACTORY.create(AppCheckError.USE_BEFORE_ACTIVATION, {
-      appName: app.name
-    });
   }
 }
 

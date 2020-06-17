@@ -20,10 +20,11 @@ import { expect } from 'chai';
 import { stub } from 'sinon';
 import { FirebaseApp } from '@firebase/app-types';
 import { getFakeApp, getFakeGreCAPTCHA } from '../test/util';
-import { initialize, RECAPTCHA_URL } from './recaptcha';
+import { initialize, RECAPTCHA_URL, getToken } from './recaptcha';
 import * as utils from './util';
 import { getState } from './state';
 import { Deferred } from '@firebase/util';
+import { activate } from './api';
 
 describe('recaptcha', () => {
   let app: FirebaseApp;
@@ -36,7 +37,7 @@ describe('recaptcha', () => {
     removegreCAPTCHAScriptsOnPage();
   });
 
-  describe('initialize', () => {
+  describe('initialize()', () => {
     it('sets reCAPTCHAState', async () => {
       self.grecaptcha = getFakeGreCAPTCHA();
       expect(getState(app).reCAPTCHAState).to.equal(undefined);
@@ -76,6 +77,40 @@ describe('recaptcha', () => {
       });
 
       expect(getState(app).reCAPTCHAState?.widgetId).to.equal('fake_widget_1');
+    });
+  });
+
+  describe('getToken()', () => {
+    it('throws if AppCheck has not been activated yet', () => {
+      return expect(getToken(app)).to.eventually.rejectedWith(
+        /AppCheck is being used before activate\(\) is called/
+      );
+    });
+
+    it('calls recaptcha.execute with correct widgetId', async () => {
+      const grecaptchaFake = getFakeGreCAPTCHA();
+      const executeStub = stub(grecaptchaFake, 'execute').returns(
+        Promise.resolve('fake-recaptcha-token')
+      );
+      self.grecaptcha = grecaptchaFake;
+      activate(app);
+      await getToken(app);
+
+      expect(executeStub).to.have.been.calledWith('fake_widget_1', {
+        action: 'fire_app_check'
+      });
+    });
+
+    it('resolves with token returned by recaptcha.execute', async () => {
+      const grecaptchaFake = getFakeGreCAPTCHA();
+      stub(grecaptchaFake, 'execute').returns(
+        Promise.resolve('fake-recaptcha-token')
+      );
+      self.grecaptcha = grecaptchaFake;
+      activate(app);
+      const token = await getToken(app);
+
+      expect(token).to.equal('fake-recaptcha-token');
     });
   });
 });

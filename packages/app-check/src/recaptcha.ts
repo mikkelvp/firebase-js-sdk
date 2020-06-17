@@ -18,7 +18,7 @@
 import { FirebaseApp } from '@firebase/app-types';
 import { getState, setState } from './state';
 import { Deferred } from '@firebase/util';
-import { getRecaptcha } from './util';
+import { getRecaptcha, ensureActivated } from './util';
 
 export const RECAPTCHA_URL = 'https://www.google.com/recaptcha/api.js';
 
@@ -61,13 +61,10 @@ export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
 }
 
 export async function getToken(app: FirebaseApp): Promise<string> {
-  const reCAPTCHAState = getState(app).reCAPTCHAState;
+  ensureActivated(app);
 
-  // it shouldn't happen
-  if (!reCAPTCHAState) {
-    throw Error(`App Check has not been activated for ${app.name}`);
-  }
-
+  // ensureActivated() guarantees that reCAPTCHAState is set
+  const reCAPTCHAState = getState(app).reCAPTCHAState!;
   const recaptcha = await reCAPTCHAState.initialized.promise;
 
   return new Promise((resolve, _reject) => {
