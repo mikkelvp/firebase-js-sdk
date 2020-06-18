@@ -28,12 +28,18 @@ export class Refresher {
   private nextErrorWaitInterval: number;
   constructor(
     private readonly operation: () => Promise<unknown>,
-    private readonly retryPolicy: (error: Error) => boolean,
+    private readonly retryPolicy: (error: unknown) => boolean,
     private readonly getWaitDuration: () => number,
     private readonly lowerBound: number,
     private readonly upperBound: number
   ) {
     this.nextErrorWaitInterval = lowerBound;
+
+    if (lowerBound > upperBound) {
+      throw new Error(
+        'Proactive refresh lower bound greater than upper bound!'
+      );
+    }
   }
 
   start(): void {
@@ -56,7 +62,6 @@ export class Refresher {
 
   private async process(hasSucceeded: boolean): Promise<void> {
     this.stop();
-
     try {
       this.pending = new Deferred();
       await sleep(this.getNextRun(hasSucceeded));
@@ -68,7 +73,6 @@ export class Refresher {
       // TODO: unit test this
       this.pending.resolve();
       await this.pending.promise;
-
       this.pending = new Deferred();
       await this.operation();
 
@@ -83,6 +87,8 @@ export class Refresher {
         this.process(false).catch(() => {
           /* we don't care about the result */
         });
+      } else {
+        this.stop();
       }
     }
   }
