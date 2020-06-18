@@ -27,7 +27,7 @@ import {
 
 export function factory(app: FirebaseApp): FirebaseAppCheck {
   return {
-    activate: (provider: AppCheckProvider) => activate(app, provider)
+    activate: (provider?: AppCheckProvider) => activate(app, provider)
   };
 }
 
