@@ -62,6 +62,7 @@ export async function exchangeToken({
 
   let responseBody: AppCheckResponse;
   try {
+    // JSON parsing throws SyntaxError if the response body isn't a JSON string.
     responseBody = await response.json();
   } catch (originalError) {
     throw ERROR_FACTORY.create(AppCheckError.FETCH_PARSE_ERROR, {
