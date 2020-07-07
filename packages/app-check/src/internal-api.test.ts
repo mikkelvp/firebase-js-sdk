@@ -27,6 +27,7 @@ import {
   removeTokenListener
 } from './internal-api';
 import * as reCAPTCHA from './recaptcha';
+import * as client from './client';
 import { getState } from './state';
 
 describe('internal api', () => {
@@ -39,10 +40,15 @@ describe('internal api', () => {
   describe('getToken()', () => {
     it('uses custom token to exchange for AppCheck token if customTokenProvider is provided', async () => {
       const customTokenProvider = getFakeCustomTokenProvider();
-
       const customProviderSpy = spy(customTokenProvider, 'getToken');
-      activate(app, customTokenProvider);
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve({
+          token: `fake-app-check-token-fake-custom-token`,
+          expirationTime: 123
+        })
+      );
 
+      activate(app, customTokenProvider);
       const token = await getToken(app);
 
       expect(customProviderSpy).to.be.called;
@@ -58,6 +64,13 @@ describe('internal api', () => {
       const reCAPTCHASpy = stub(reCAPTCHA, 'getToken').returns(
         Promise.resolve('fake-recaptcha-token')
       );
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve({
+          token: `fake-app-check-token-fake-recaptcha-token`,
+          expirationTime: 123
+        })
+      );
+
       const token = await getToken(app);
 
       expect(reCAPTCHASpy).to.be.called;
@@ -73,6 +86,13 @@ describe('internal api', () => {
       stub(reCAPTCHA, 'getToken').returns(
         Promise.resolve('fake-recaptcha-token')
       );
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve({
+          token: `fake-app-check-token-fake-recaptcha-token`,
+          expirationTime: 123
+        })
+      );
+
       const listener1 = spy();
       const listener2 = spy();
       addTokenListener(app, listener1);
@@ -94,6 +114,12 @@ describe('internal api', () => {
       activate(app);
       stub(reCAPTCHA, 'getToken').returns(
         Promise.resolve('fake-recaptcha-token')
+      );
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve({
+          token: `fake-app-check-token-fake-recaptcha-token`,
+          expirationTime: 123
+        })
       );
       const listener1 = (): void => {
         throw new Error();
