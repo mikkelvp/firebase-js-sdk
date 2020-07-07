@@ -19,7 +19,10 @@ import { ErrorFactory, ErrorMap } from '@firebase/util';
 
 export const enum AppCheckError {
   ALREADY_ACTIVATED = 'already-activated',
-  USE_BEFORE_ACTIVATION = 'use-before-activation'
+  USE_BEFORE_ACTIVATION = 'use-before-activation',
+  FETCH_NETWORK_ERROR = 'fetch-network-error',
+  FETCH_PARSE_ERROR = 'fetch-parse-error',
+  FETCH_STATUS_ERROR = 'fetch-status-error'
 }
 
 const ERRORS: ErrorMap<AppCheckError> = {
@@ -29,12 +32,23 @@ const ERRORS: ErrorMap<AppCheckError> = {
     'AppCheck can only be activated once.',
   [AppCheckError.USE_BEFORE_ACTIVATION]:
     'AppCheck is being used before activate() is called for FirebaseApp {$appName}. ' +
-    'Please make sure you call activate() before instantiating other Firebase services.'
+    'Please make sure you call activate() before instantiating other Firebase services.',
+  [AppCheckError.FETCH_NETWORK_ERROR]:
+    'Fetch failed to connect to a network. Check Internet connection. ' +
+    'Original error: {$originalErrorMessage}.',
+  [AppCheckError.FETCH_PARSE_ERROR]:
+    'Fetch client could not parse response.' +
+    ' Original error: {$originalErrorMessage}.',
+  [AppCheckError.FETCH_STATUS_ERROR]:
+    'Fetch server returned an HTTP error status. HTTP status: {$httpStatus}.'
 };
 
 interface ErrorParams {
   [AppCheckError.ALREADY_ACTIVATED]: { appName: string };
   [AppCheckError.USE_BEFORE_ACTIVATION]: { appName: string };
+  [AppCheckError.FETCH_NETWORK_ERROR]: { originalErrorMessage: string };
+  [AppCheckError.FETCH_PARSE_ERROR]: { originalErrorMessage: string };
+  [AppCheckError.FETCH_STATUS_ERROR]: { httpStatus: number };
 }
 
 export const ERROR_FACTORY = new ErrorFactory<AppCheckError, ErrorParams>(

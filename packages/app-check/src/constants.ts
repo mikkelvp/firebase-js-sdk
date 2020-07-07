@@ -14,9 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-export const EXCHANGE_CUSTOM_TOKEN_ENDPOINT = '';
-export const EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT = '';
+export const BASE_ENDPOINT =
+  'https://autopush-firebaseappcheck-pa.sandbox.googleapis.com/v1alpha';
+export const EXCHANGE_CUSTOM_TOKEN_METHOD = 'exchangeCustomToken';
+export const EXCHANGE_RECAPTCHA_TOKEN_METHOD = 'exchangeRecaptchaToken';
 export const TOKEN_REFRESH_TIME = {
   /**
    * The offset time before token natural expiration to run the refresh.

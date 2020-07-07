@@ -22,13 +22,14 @@ import {
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
 import { getState, setState } from './state';
-import {
-  EXCHANGE_CUSTOM_TOKEN_ENDPOINT,
-  EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT,
-  TOKEN_REFRESH_TIME
-} from './constants';
+import { TOKEN_REFRESH_TIME } from './constants';
 import { Refresher } from './proactive-refresh';
 import { ensureActivated } from './util';
+import {
+  exchangeToken,
+  getExchangeCustomTokenRequest,
+  getExchangeRecaptchaTokenRequest
+} from './client';
 
 export async function getToken(
   app: FirebaseApp
@@ -36,13 +37,17 @@ export async function getToken(
   ensureActivated(app);
 
   const state = getState(app);
-  let token;
+  let token: AppCheckToken;
   if (state.customProvider) {
     const attestedClaimsToken = await state.customProvider.getToken();
-    token = await exchangeCustomTokenForAppCheckToken(attestedClaimsToken);
+    token = await exchangeToken(
+      getExchangeCustomTokenRequest(app, attestedClaimsToken)
+    );
   } else {
     const attestedClaimsToken = await getReCAPTCHAToken(app);
-    token = await exchangeReCAPTCHATokenForAppCheckToken(attestedClaimsToken);
+    token = await exchangeToken(
+      getExchangeRecaptchaTokenRequest(app, attestedClaimsToken)
+    );
   }
 
   notifyTokenListeners(app, token);
@@ -130,25 +135,4 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
       // If any handler fails, ignore and run next handler.
     }
   }
-}
-
-// TODO: integrate with the actual backend to get the AppCheckToken
-async function exchangeCustomTokenForAppCheckToken(
-  customToken: string
-): Promise<AppCheckToken> {
-  const _endpoint = EXCHANGE_CUSTOM_TOKEN_ENDPOINT;
-  return {
-    token: `fake-app-check-token-${customToken}`,
-    expirationTime: 123
-  };
-}
-// TODO: integrate with the actual backend to get the AppCheckToken
-async function exchangeReCAPTCHATokenForAppCheckToken(
-  reCAPTCHAToken: string
-): Promise<AppCheckToken> {
-  const _endpoint = EXCHANGE_RECAPTCHA_TOKEN_ENDPOINT;
-  return {
-    token: `fake-app-check-token-${reCAPTCHAToken}`,
-    expirationTime: 123
-  };
 }
