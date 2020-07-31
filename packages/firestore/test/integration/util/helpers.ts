@@ -16,53 +16,16 @@
  */
 
 import * as firestore from '@firebase/firestore-types';
-import firebase from './firebase_export';
+import {
+  ALT_PROJECT_ID,
+  DEFAULT_PROJECT_ID,
+  DEFAULT_SETTINGS
+} from './settings';
+import * as firebaseExport from './firebase_export';
+
+const newTestFirestore = firebaseExport.newTestFirestore;
 
 /* eslint-disable no-restricted-globals */
-
-/**
- * NOTE: These helpers are used by api/ tests and therefore may not have any
- * dependencies on src/ files.
- */
-// __karma__ is an untyped global
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const __karma__: any;
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const PROJECT_CONFIG = require('../../../../../config/project.json');
-
-const EMULATOR_PORT = process.env.FIRESTORE_EMULATOR_PORT;
-const EMULATOR_PROJECT_ID = process.env.FIRESTORE_EMULATOR_PROJECT_ID;
-export const USE_EMULATOR = !!EMULATOR_PORT;
-
-const EMULATOR_FIRESTORE_SETTING = {
-  host: `localhost:${EMULATOR_PORT}`,
-  ssl: false
-};
-
-const PROD_FIRESTORE_SETTING = {
-  host: 'firestore.googleapis.com',
-  ssl: true
-};
-
-export const DEFAULT_SETTINGS = getDefaultSettings();
-
-// eslint-disable-next-line no-console
-console.log(`Default Settings: ${JSON.stringify(DEFAULT_SETTINGS)}`);
-
-function getDefaultSettings(): firestore.Settings {
-  const karma = typeof __karma__ !== 'undefined' ? __karma__ : undefined;
-  if (karma && karma.config.firestoreSettings) {
-    return karma.config.firestoreSettings;
-  } else {
-    return USE_EMULATOR ? EMULATOR_FIRESTORE_SETTING : PROD_FIRESTORE_SETTING;
-  }
-}
-
-export const DEFAULT_PROJECT_ID = USE_EMULATOR
-  ? EMULATOR_PROJECT_ID
-  : PROJECT_CONFIG.projectId;
-export const ALT_PROJECT_ID = 'test-db2';
 
 function isIeOrEdge(): boolean {
   if (!window.navigator) {
@@ -193,9 +156,6 @@ export function withTestDbs(
     fn
   );
 }
-
-let appCount = 0;
-
 export async function withTestDbsSettings(
   persistence: boolean,
   projectId: string,
@@ -206,29 +166,20 @@ export async function withTestDbsSettings(
   if (numDbs === 0) {
     throw new Error("Can't test with no databases");
   }
-  const promises: Array<Promise<firestore.FirebaseFirestore>> = [];
+
+  const dbs: firestore.FirebaseFirestore[] = [];
+
   for (let i = 0; i < numDbs; i++) {
-    // TODO(dimond): Right now we create a new app and Firestore instance for
-    // every test and never clean them up. We may need to revisit.
-    const app = firebase.initializeApp(
-      { apiKey: 'fake-api-key', projectId },
-      'test-app-' + appCount++
+    const firestoreClient = newTestFirestore(
+      projectId,
+      /* name =*/ undefined,
+      settings
     );
-
-    const firestore = firebase.firestore!(app);
-    firestore.settings(settings);
-
-    let ready: Promise<firestore.FirebaseFirestore>;
     if (persistence) {
-      ready = firestore.enablePersistence().then(() => firestore);
-    } else {
-      ready = Promise.resolve(firestore);
+      await firestoreClient.enablePersistence();
     }
-
-    promises.push(ready);
+    dbs.push(firestoreClient);
   }
-
-  const dbs = await Promise.all(promises);
 
   try {
     await fn(dbs);

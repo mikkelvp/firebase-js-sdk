@@ -21,21 +21,16 @@ import * as path from 'path';
 // @ts-ignore
 import * as freePortFinder from 'find-free-port';
 
-import { ChildProcessPromise } from './emulators/emulator';
 import { FirestoreEmulator } from './emulators/firestore-emulator';
 
-function runTest(
-  port: number,
-  projectId: string,
-  withPersistence: boolean
-): ChildProcessPromise {
+function runTest(port: number, projectId: string, withPersistence: boolean) {
   const options = {
     cwd: path.resolve(__dirname, '../../packages/firestore'),
     env: Object.assign({}, process.env, {
       FIRESTORE_EMULATOR_PORT: port,
       FIRESTORE_EMULATOR_PROJECT_ID: projectId
     }),
-    stdio: 'inherit'
+    stdio: 'inherit' as const
   };
   // TODO(b/113267261): Include browser test once WebChannel support is
   // ready in Firestore emulator.
@@ -53,8 +48,9 @@ async function run(): Promise<void> {
   try {
     await emulator.download();
     await emulator.setUp();
+    // When persistence is enabled, the test runner runs all tests
+    // twice (once with and once without persistence).
     await runTest(emulator.port, emulator.projectId, true);
-    await runTest(emulator.port, emulator.projectId, false);
   } finally {
     await emulator.tearDown();
   }

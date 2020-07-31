@@ -6,10 +6,8 @@
     "test": "tsc",
     "test:ci": "node ../../scripts/run_tests_in_ci.js"
   },
-  "dependencies": {
-    "firebase": "7.14.6"
-  },
   "devDependencies": {
-    "typescript": "3.8.3"
+    "firebase": "7.17.1",
+    "typescript": "3.9.7"
   }
 }

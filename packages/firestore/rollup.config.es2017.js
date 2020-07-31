@@ -18,6 +18,7 @@
 import * as path from 'path';
 
 import json from 'rollup-plugin-json';
+import alias from '@rollup/plugin-alias';
 import typescriptPlugin from 'rollup-plugin-typescript2';
 import replace from 'rollup-plugin-replace';
 import copy from 'rollup-plugin-copy-assets';
@@ -27,12 +28,7 @@ import { terser } from 'rollup-plugin-terser';
 import pkg from './package.json';
 import memoryPkg from './memory/package.json';
 
-import {
-  firestoreTransformers,
-  manglePrivatePropertiesOptions,
-  resolveNodeExterns,
-  resolveBrowserExterns
-} from './rollup.shared';
+const util = require('./rollup.shared');
 
 // Firestore is released in a number of different build configurations:
 // - Browser builds that support persistence in ES5 CJS and ES5 ESM formats and
@@ -61,6 +57,7 @@ import {
 // MARK: Browser builds
 
 const browserBuildPlugins = [
+  alias(util.generateAliasConfig('browser')),
   typescriptPlugin({
     typescript,
     tsconfigOverride: {
@@ -69,10 +66,10 @@ const browserBuildPlugins = [
       }
     },
     clean: true,
-    transformers: firestoreTransformers
+    transformers: [util.removeAssertAndPrefixInternalTransformer]
   }),
   json({ preferConst: true }),
-  terser(manglePrivatePropertiesOptions)
+  terser(util.manglePrivatePropertiesOptions)
 ];
 
 const browserBuilds = [
@@ -85,7 +82,7 @@ const browserBuilds = [
       sourcemap: true
     },
     plugins: browserBuildPlugins,
-    external: resolveBrowserExterns
+    external: util.resolveBrowserExterns
   },
   // Memory-only build
   {
@@ -96,13 +93,44 @@ const browserBuilds = [
       sourcemap: true
     },
     plugins: browserBuildPlugins,
-    external: resolveBrowserExterns
+    external: util.resolveBrowserExterns
+  }
+];
+
+const reactNativeBuildPlugins = [
+  alias(util.generateAliasConfig('rn')),
+  ...browserBuildPlugins.slice(1)
+];
+
+const reactNativeBuilds = [
+  // Persistence build
+  {
+    input: 'index.rn.ts',
+    output: {
+      file: pkg['react-native'],
+      format: 'es',
+      sourcemap: true
+    },
+    plugins: reactNativeBuildPlugins,
+    external: util.resolveBrowserExterns
+  },
+  // Memory-only build
+  {
+    input: 'index.rn.memory.ts',
+    output: {
+      file: path.resolve('./memory', memoryPkg['react-native']),
+      format: 'es',
+      sourcemap: true
+    },
+    plugins: reactNativeBuildPlugins,
+    external: util.resolveBrowserExterns
   }
 ];
 
 // MARK: Node builds
 
 const nodeBuildPlugins = [
+  alias(util.generateAliasConfig('node')),
   typescriptPlugin({
     typescript,
     tsconfigOverride: {
@@ -110,7 +138,8 @@ const nodeBuildPlugins = [
         target: 'es2017'
       }
     },
-    clean: true
+    clean: true,
+    transformers: [util.removeAssertTransformer]
   }),
   json(),
   // Needed as we also use the *.proto files
@@ -128,7 +157,7 @@ const nodeBuilds = [
     input: 'index.node.ts',
     output: [{ file: pkg['main-esm2017'], format: 'es', sourcemap: true }],
     plugins: nodeBuildPlugins,
-    external: resolveNodeExterns
+    external: util.resolveNodeExterns
   },
   // Memory-only build
   {
@@ -141,8 +170,8 @@ const nodeBuilds = [
       }
     ],
     plugins: nodeBuildPlugins,
-    external: resolveNodeExterns
+    external: util.resolveNodeExterns
   }
 ];
 
-export default [...browserBuilds, ...nodeBuilds];
+export default [...browserBuilds, ...reactNativeBuilds, ...nodeBuilds];

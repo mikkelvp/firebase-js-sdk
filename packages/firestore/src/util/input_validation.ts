@@ -17,6 +17,8 @@
 import { fail } from './assert';
 import { Code, FirestoreError } from './error';
 import { Dict, forEach } from './obj';
+import { DocumentKey } from '../model/document_key';
+import { ResourcePath } from '../model/path';
 
 /** Types accepted by validateType() and related methods for validation. */
 export type ValidationType =
@@ -56,7 +58,7 @@ export function validateNoArgs(functionName: string, args: IArguments): void {
  */
 export function validateExactNumberOfArgs(
   functionName: string,
-  args: IArguments,
+  args: ArrayLike<unknown>,
   numberOfArgs: number
 ): void {
   if (args.length !== numberOfArgs) {
@@ -315,6 +317,32 @@ export function validateStringEnum<T>(
     );
   }
   return argument as T;
+}
+
+/**
+ * Validates that `path` refers to a document (indicated by the fact it contains
+ * an even numbers of segments).
+ */
+export function validateDocumentPath(path: ResourcePath): void {
+  if (!DocumentKey.isDocumentKey(path)) {
+    throw new FirestoreError(
+      Code.INVALID_ARGUMENT,
+      `Invalid document reference. Document references must have an even number of segments, but ${path} has ${path.length}.`
+    );
+  }
+}
+
+/**
+ * Validates that `path` refers to a collection (indicated by the fact it
+ * contains an odd numbers of segments).
+ */
+export function validateCollectionPath(path: ResourcePath): void {
+  if (DocumentKey.isDocumentKey(path)) {
+    throw new FirestoreError(
+      Code.INVALID_ARGUMENT,
+      `Invalid collection reference. Collection references must have an odd number of segments, but ${path} has ${path.length}.`
+    );
+  }
 }
 
 /** Helper to validate the type of a provided input. */
