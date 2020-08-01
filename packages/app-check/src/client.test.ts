@@ -28,7 +28,7 @@ import {
 import { FirebaseError } from '@firebase/util';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 
-describe.only('client', () => {
+describe('client', () => {
   let app: FirebaseApp;
   let fetchStub: SinonStub<[RequestInfo, RequestInit?], Promise<Response>>;
   beforeEach(() => {

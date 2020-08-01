@@ -100,10 +100,14 @@ function renderInvisibleWidget(app: FirebaseApp, container: string): void {
   });
 
   const state = getState(app);
-  // state.reCAPTCHAState is set in the beginning of the function
-  state.reCAPTCHAState!.widgetId = widgetId;
 
-  setState(app, state);
+  setState(app, {
+    ...state,
+    reCAPTCHAState: {
+      ...state.reCAPTCHAState!, // state.reCAPTCHAState is set in the initialize()
+      widgetId
+    }
+  });
 }
 
 function loadReCAPTCHAScript(onload: () => void): void {

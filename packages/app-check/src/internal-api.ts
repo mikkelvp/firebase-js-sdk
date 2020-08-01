@@ -30,6 +30,7 @@ import {
   getExchangeCustomTokenRequest,
   getExchangeRecaptchaTokenRequest
 } from './client';
+import { writeTokenToStorage, readTokenFromStorage } from './storage';
 
 export async function getToken(
   app: FirebaseApp
@@ -37,7 +38,23 @@ export async function getToken(
   ensureActivated(app);
 
   const state = getState(app);
-  let token: AppCheckToken;
+
+  let token: AppCheckToken | undefined = state.token;
+  // try to load token from indexedDB to the memory state if it's the first time this function is called
+  if (!token) {
+    const cachedToken = await readTokenFromStorage(app);
+    if (cachedToken) {
+      token = cachedToken;
+      setState(app, { ...state, token });
+    }
+  }
+
+  // return the valid token in memory
+  if (token && isValid(token)) {
+    return token;
+  }
+
+  // request new token
   if (state.customProvider) {
     const attestedClaimsToken = await state.customProvider.getToken();
     token = await exchangeToken(
@@ -49,6 +66,10 @@ export async function getToken(
       getExchangeRecaptchaTokenRequest(app, attestedClaimsToken)
     );
   }
+
+  // write the new token to the memory state as well as the persistent storage
+  setState(app, { ...state, token });
+  await writeTokenToStorage(app, token);
 
   notifyTokenListeners(app, token);
 
@@ -135,4 +156,8 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
       // If any handler fails, ignore and run next handler.
     }
   }
+}
+
+function isValid(token: AppCheckToken): boolean {
+  return token.expirationTime - Date.now() > 0;
 }

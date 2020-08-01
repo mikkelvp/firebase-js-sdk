@@ -22,7 +22,10 @@ export const enum AppCheckError {
   USE_BEFORE_ACTIVATION = 'use-before-activation',
   FETCH_NETWORK_ERROR = 'fetch-network-error',
   FETCH_PARSE_ERROR = 'fetch-parse-error',
-  FETCH_STATUS_ERROR = 'fetch-status-error'
+  FETCH_STATUS_ERROR = 'fetch-status-error',
+  STORAGE_OPEN = 'storage-open',
+  STORAGE_GET = 'storage-get',
+  STORAGE_WRITE = 'storage-set'
 }
 
 const ERRORS: ErrorMap<AppCheckError> = {
@@ -40,7 +43,13 @@ const ERRORS: ErrorMap<AppCheckError> = {
     'Fetch client could not parse response.' +
     ' Original error: {$originalErrorMessage}.',
   [AppCheckError.FETCH_STATUS_ERROR]:
-    'Fetch server returned an HTTP error status. HTTP status: {$httpStatus}.'
+    'Fetch server returned an HTTP error status. HTTP status: {$httpStatus}.',
+  [AppCheckError.STORAGE_OPEN]:
+    'Error thrown when opening storage. Original error: {$originalErrorMessage}.',
+  [AppCheckError.STORAGE_GET]:
+    'Error thrown when reading from storage. Original error: {$originalErrorMessage}.',
+  [AppCheckError.STORAGE_WRITE]:
+    'Error thrown when writing to storage. Original error: {$originalErrorMessage}.'
 };
 
 interface ErrorParams {
@@ -49,6 +58,9 @@ interface ErrorParams {
   [AppCheckError.FETCH_NETWORK_ERROR]: { originalErrorMessage: string };
   [AppCheckError.FETCH_PARSE_ERROR]: { originalErrorMessage: string };
   [AppCheckError.FETCH_STATUS_ERROR]: { httpStatus: number };
+  [AppCheckError.STORAGE_OPEN]: { originalErrorMessage?: string };
+  [AppCheckError.STORAGE_GET]: { originalErrorMessage?: string };
+  [AppCheckError.STORAGE_WRITE]: { originalErrorMessage?: string };
 }
 
 export const ERROR_FACTORY = new ErrorFactory<AppCheckError, ErrorParams>(
