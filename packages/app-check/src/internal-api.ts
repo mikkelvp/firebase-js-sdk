@@ -33,24 +33,28 @@ import {
 import { writeTokenToStorage, readTokenFromStorage } from './storage';
 
 export async function getToken(
-  app: FirebaseApp
+  app: FirebaseApp,
+  forceRefresh = false
 ): Promise<AppCheckToken | null> {
   ensureActivated(app);
 
   const state = getState(app);
 
   let token: AppCheckToken | undefined = state.token;
-  // try to load token from indexedDB to the memory state if it's the first time this function is called
+  // try to load token from indexedDB if it's the first time this function is called
   if (!token) {
     const cachedToken = await readTokenFromStorage(app);
-    if (cachedToken) {
+    if (cachedToken && isValid(cachedToken)) {
       token = cachedToken;
+
       setState(app, { ...state, token });
+      // notify all listeners with the cached token
+      notifyTokenListeners(app, token);
     }
   }
 
-  // return the valid token in memory
-  if (token && isValid(token)) {
+  // return the cached token if it's valid
+  if (!forceRefresh && token && isValid(token)) {
     return token;
   }
 
@@ -95,6 +99,12 @@ export function addTokenListener(
     newState.tokenRefresher.start();
   }
 
+  // invoke the listener async immediately if there is a valid token
+  if (state.token && isValid(state.token)) {
+    const validToken = state.token;
+    Promise.resolve().then(() => listener(validToken));
+  }
+
   setState(app, newState);
 }
 
@@ -123,7 +133,16 @@ function createTokenRefresher(app: FirebaseApp): Refresher {
   return new Refresher(
     // Keep in mind when this fails for any reason other than the ones
     // for which we should retry, it will effectively stop the proactive refresh.
-    () => getToken(app),
+    () => {
+      const state = getState(app);
+      // If there is no token, we will try to load it from storage and use it
+      // If there is a token, we force refresh it because we know it's going to expire soon
+      if (!state.token) {
+        return getToken(app);
+      } else {
+        return getToken(app, true);
+      }
+    },
     () => {
       // TODO: when should we retry?
       return true;
@@ -131,11 +150,12 @@ function createTokenRefresher(app: FirebaseApp): Refresher {
     () => {
       const state = getState(app);
 
-      if (state?.token) {
-        return (
+      if (state.token) {
+        return Math.max(
+          0,
           state.token.expirationTime -
-          Date.now() -
-          TOKEN_REFRESH_TIME.OFFSET_DURATION
+            Date.now() -
+            TOKEN_REFRESH_TIME.OFFSET_DURATION
         );
       } else {
         return 0;

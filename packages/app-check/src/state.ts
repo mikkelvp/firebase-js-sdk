@@ -52,3 +52,8 @@ export function getState(app: FirebaseApp): AppCheckState {
 export function setState(app: FirebaseApp, state: AppCheckState): void {
   APP_CHECK_STATES.set(app, state);
 }
+
+// for testing only
+export function clearState(): void {
+  APP_CHECK_STATES.clear();
+}
