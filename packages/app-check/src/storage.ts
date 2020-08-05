@@ -18,6 +18,7 @@
 import { AppCheckToken } from '@firebase/app-check-interop-types';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
+import { isIndexedDBAvailable } from './util';
 
 export function readTokenFromStorage(
   app: FirebaseApp
@@ -38,10 +39,6 @@ export function writeTokenToStorage(
   }
 
   return Promise.resolve();
-}
-
-function isIndexedDBAvailable() {
-  return typeof indexedDB !== 'undefined';
 }
 
 const DB_NAME = 'firebase-app-check-database';

@@ -31,3 +31,7 @@ export function ensureActivated(app: FirebaseApp): void {
     });
   }
 }
+
+export function isIndexedDBAvailable() {
+  return typeof indexedDB !== 'undefined';
+}
