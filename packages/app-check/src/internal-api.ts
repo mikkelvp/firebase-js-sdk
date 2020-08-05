@@ -52,7 +52,6 @@ export async function getToken(
       notifyTokenListeners(app, token);
     }
   }
-
   // return the cached token if it's valid
   if (!forceRefresh && token && isValid(token)) {
     return token;

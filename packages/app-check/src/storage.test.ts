@@ -22,7 +22,7 @@ import * as util from './util';
 import { expect } from 'chai';
 import { stub } from 'sinon';
 
-describe.only('Storage', () => {
+describe('Storage', () => {
   const app = getFakeApp();
   const fakeToken = {
     token: 'fake-app-check-token',

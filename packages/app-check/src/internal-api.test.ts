@@ -30,7 +30,6 @@ import * as reCAPTCHA from './recaptcha';
 import * as client from './client';
 import * as storage from './storage';
 import { getState, clearState, setState } from './state';
-import { TOKEN_REFRESH_TIME } from './constants';
 import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
 
 describe('internal api', () => {
@@ -43,46 +42,48 @@ describe('internal api', () => {
   afterEach(() => clearState());
   // TODO: test error conditions
   describe('getToken()', () => {
+    const fakeRecaptchaToken = 'fake-recaptcha-token';
+    const fakeRecaptchaAppCheckToken = {
+      token: 'fake-recaptcha-app-check-token',
+      expirationTime: 123
+    };
+    const fakeCustomAppCheckToken = {
+      token: 'fake-custom-app-check-token',
+      expirationTime: 123
+    };
+    const fakeCachedAppCheckToken = {
+      token: 'fake-cached-app-check-token',
+      expirationTime: 123
+    };
+
     it('uses custom token to exchange for AppCheck token if customTokenProvider is provided', async () => {
       const customTokenProvider = getFakeCustomTokenProvider();
       const customProviderSpy = spy(customTokenProvider, 'getToken');
       stub(client, 'exchangeToken').returns(
-        Promise.resolve({
-          token: `fake-app-check-token-fake-custom-token`,
-          expirationTime: 123
-        })
+        Promise.resolve(fakeCustomAppCheckToken)
       );
 
       activate(app, customTokenProvider);
       const token = await getToken(app);
 
       expect(customProviderSpy).to.be.called;
-      expect(token).to.deep.equal({
-        token: `fake-app-check-token-fake-custom-token`,
-        expirationTime: 123
-      });
+      expect(token).to.deep.equal(fakeCustomAppCheckToken);
     });
 
     it('uses reCAPTCHA token to exchange for AppCheck token if no customTokenProvider is provided', async () => {
       activate(app);
 
       const reCAPTCHASpy = stub(reCAPTCHA, 'getToken').returns(
-        Promise.resolve('fake-recaptcha-token')
+        Promise.resolve(fakeRecaptchaToken)
       );
       stub(client, 'exchangeToken').returns(
-        Promise.resolve({
-          token: `fake-app-check-token-fake-recaptcha-token`,
-          expirationTime: 123
-        })
+        Promise.resolve(fakeRecaptchaAppCheckToken)
       );
 
       const token = await getToken(app);
 
       expect(reCAPTCHASpy).to.be.called;
-      expect(token).to.deep.equal({
-        token: `fake-app-check-token-fake-recaptcha-token`,
-        expirationTime: 123
-      });
+      expect(token).to.deep.equal(fakeRecaptchaAppCheckToken);
     });
 
     it('notifies listeners using cached token', async () => {
@@ -90,10 +91,7 @@ describe('internal api', () => {
 
       const clock = useFakeTimers();
       stub(storage, 'readTokenFromStorage').returns(
-        Promise.resolve({
-          token: `fake-cached-app-check-token`,
-          expirationTime: 123
-        })
+        Promise.resolve(fakeCachedAppCheckToken)
       );
 
       const listener1 = spy();
@@ -103,14 +101,8 @@ describe('internal api', () => {
 
       await getToken(app);
 
-      expect(listener1).to.be.calledWith({
-        token: `fake-cached-app-check-token`,
-        expirationTime: 123
-      });
-      expect(listener2).to.be.calledWith({
-        token: `fake-cached-app-check-token`,
-        expirationTime: 123
-      });
+      expect(listener1).to.be.calledWith(fakeCachedAppCheckToken);
+      expect(listener2).to.be.calledWith(fakeCachedAppCheckToken);
 
       clock.restore();
     });
@@ -119,14 +111,9 @@ describe('internal api', () => {
       activate(app);
 
       stub(storage, 'readTokenFromStorage').returns(Promise.resolve(undefined));
-      stub(reCAPTCHA, 'getToken').returns(
-        Promise.resolve('fake-recaptcha-token')
-      );
+      stub(reCAPTCHA, 'getToken').returns(Promise.resolve(fakeRecaptchaToken));
       stub(client, 'exchangeToken').returns(
-        Promise.resolve({
-          token: `fake-app-check-token-fake-recaptcha-token`,
-          expirationTime: 123
-        })
+        Promise.resolve(fakeRecaptchaAppCheckToken)
       );
 
       const listener1 = spy();
@@ -136,26 +123,15 @@ describe('internal api', () => {
 
       await getToken(app);
 
-      expect(listener1).to.be.calledWith({
-        token: `fake-app-check-token-fake-recaptcha-token`,
-        expirationTime: 123
-      });
-      expect(listener2).to.be.calledWith({
-        token: `fake-app-check-token-fake-recaptcha-token`,
-        expirationTime: 123
-      });
+      expect(listener1).to.be.calledWith(fakeRecaptchaAppCheckToken);
+      expect(listener2).to.be.calledWith(fakeRecaptchaAppCheckToken);
     });
 
     it('ignores listeners that throw', async () => {
       activate(app);
-      stub(reCAPTCHA, 'getToken').returns(
-        Promise.resolve('fake-recaptcha-token')
-      );
+      stub(reCAPTCHA, 'getToken').returns(Promise.resolve(fakeRecaptchaToken));
       stub(client, 'exchangeToken').returns(
-        Promise.resolve({
-          token: `fake-app-check-token-fake-recaptcha-token`,
-          expirationTime: 123
-        })
+        Promise.resolve(fakeRecaptchaAppCheckToken)
       );
       const listener1 = (): void => {
         throw new Error();
@@ -167,10 +143,68 @@ describe('internal api', () => {
 
       await getToken(app);
 
-      expect(listener2).to.be.calledWith({
-        token: `fake-app-check-token-fake-recaptcha-token`,
-        expirationTime: 123
-      });
+      expect(listener2).to.be.calledWith(fakeRecaptchaAppCheckToken);
+    });
+
+    it('loads persisted token to memory and returns it', async () => {
+      const clock = useFakeTimers();
+      activate(app);
+
+      stub(storage, 'readTokenFromStorage').returns(
+        Promise.resolve(fakeCachedAppCheckToken)
+      );
+
+      const clientStub = stub(client, 'exchangeToken');
+
+      expect(getState(app).token).to.equal(undefined);
+      expect(await getToken(app)).to.equal(fakeCachedAppCheckToken);
+      expect(getState(app).token).to.equal(fakeCachedAppCheckToken);
+      expect(clientStub).has.not.been.called;
+
+      clock.restore();
+    });
+
+    it('persists token to storage', async () => {
+      activate(app);
+
+      stub(storage, 'readTokenFromStorage').returns(Promise.resolve(undefined));
+      stub(reCAPTCHA, 'getToken').returns(Promise.resolve(fakeRecaptchaToken));
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve(fakeRecaptchaAppCheckToken)
+      );
+      const storageWriteStub = stub(storage, 'writeTokenToStorage');
+
+      expect(await getToken(app)).to.equal(fakeRecaptchaAppCheckToken);
+      expect(storageWriteStub).has.been.calledWith(
+        app,
+        fakeRecaptchaAppCheckToken
+      );
+    });
+
+    it('returns the valid token in memory without making network request', async () => {
+      const clock = useFakeTimers();
+      activate(app);
+      setState(app, { ...getState(app), token: fakeRecaptchaAppCheckToken });
+
+      const clientStub = stub(client, 'exchangeToken');
+      expect(await getToken(app)).to.equal(fakeRecaptchaAppCheckToken);
+      expect(clientStub).to.not.have.been.called;
+
+      clock.restore();
+    });
+
+    it('force to get new token when forceRefresh is true', async () => {
+      activate(app);
+      setState(app, { ...getState(app), token: fakeRecaptchaAppCheckToken });
+
+      stub(reCAPTCHA, 'getToken').returns(Promise.resolve(fakeRecaptchaToken));
+      stub(client, 'exchangeToken').returns(
+        Promise.resolve(fakeRecaptchaAppCheckToken)
+      );
+
+      expect(await getToken(app, true)).to.deep.equal(
+        fakeRecaptchaAppCheckToken
+      );
     });
   });
 
