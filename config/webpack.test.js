@@ -74,21 +74,39 @@ module.exports = {
             ]
           }
         }
+      },
+      /**
+       * Transform firebase packages to cjs, so they can be stubbed in tests
+       */
+      {
+        test: /\.js$/,
+        include: function (modulePath) {
+          const match = /node_modules\/@firebase.*/.test(modulePath);
+          return match;
+        },
+        use: {
+          loader: 'babel-loader',
+          options: {
+            plugins: ['@babel/plugin-transform-modules-commonjs']
+          }
+        }
       }
     ]
   },
   resolve: {
     modules: ['node_modules', path.resolve(__dirname, '../../node_modules')],
-    mainFields: ['browser', 'main', 'module'],
-    extensions: ['.js', '.ts']
+    mainFields: ['browser', 'module', 'main'],
+    extensions: ['.js', '.ts'],
+    symlinks: false
   },
   plugins: [
     new webpack.NormalModuleReplacementPlugin(
       FIRESTORE_PLATFORM_RE,
       resource => {
+        const targetPlatform = process.env.TEST_PLATFORM || 'browser';
         resource.request = resource.request.replace(
           FIRESTORE_PLATFORM_RE,
-          '$1/platform/browser/$2.ts'
+          `$1/platform/${targetPlatform}/$2.ts`
         );
       }
     ),

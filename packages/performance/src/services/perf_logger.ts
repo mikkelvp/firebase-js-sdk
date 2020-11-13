@@ -114,15 +114,9 @@ export function logTrace(trace: Trace): void {
   if (!Api.getInstance().requiredApisAvailable()) {
     return;
   }
+
   // Only log the page load auto traces if page is visible.
   if (trace.isAuto && getVisibilityState() !== VisibilityState.VISIBLE) {
-    return;
-  }
-
-  if (
-    !settingsService.loggingEnabled ||
-    !settingsService.logTraceAfterSampling
-  ) {
     return;
   }
 
@@ -131,6 +125,7 @@ export function logTrace(trace: Trace): void {
   } else {
     // Custom traces can be used before the initialization but logging
     // should wait until after.
+
     getInitializationPromise().then(
       () => sendTraceLog(trace),
       () => sendTraceLog(trace)
@@ -139,9 +134,19 @@ export function logTrace(trace: Trace): void {
 }
 
 function sendTraceLog(trace: Trace): void {
-  if (getIid()) {
-    setTimeout(() => sendLog(trace, ResourceType.Trace), 0);
+  if (!getIid()) {
+    return;
   }
+
+  const settingsService = SettingsService.getInstance();
+  if (
+    !settingsService.loggingEnabled ||
+    !settingsService.logTraceAfterSampling
+  ) {
+    return;
+  }
+
+  setTimeout(() => sendLog(trace, ResourceType.Trace), 0);
 }
 
 export function logNetworkRequest(networkRequest: NetworkRequest): void {

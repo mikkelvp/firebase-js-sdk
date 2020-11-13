@@ -15,25 +15,29 @@
  * limitations under the License.
  */
 
-import * as firestore from '@firebase/firestore-types';
-
-import * as api from '../protos/firestore_proto_api';
+import { Value as ProtoValue } from '../protos/firestore_proto_api';
 
 import { FirebaseApp } from '@firebase/app-types';
 import { _FirebaseApp, FirebaseService } from '@firebase/app-types/private';
-import { DatabaseId, DatabaseInfo } from '../core/database_info';
+import { DatabaseId } from '../core/database_info';
 import { ListenOptions } from '../core/event_manager';
 import {
-  MemoryOfflineComponentProvider,
-  OfflineComponentProvider,
-  OnlineComponentProvider
-} from '../core/component_provider';
-import { FirestoreClient, PersistenceSettings } from '../core/firestore_client';
+  FirestoreClient,
+  firestoreClientGetDocumentsFromLocalCache,
+  firestoreClientGetDocumentsViaSnapshotListener,
+  firestoreClientListen,
+  firestoreClientTransaction,
+  firestoreClientWrite
+} from '../core/firestore_client';
 import {
   Bound,
   Direction,
   FieldFilter,
   Filter,
+  findFilterOperator,
+  getFirstOrderByField,
+  getInequalityFilterField,
+  hasLimitToLast,
   isCollectionGroupQuery,
   LimitType,
   newQueryComparator,
@@ -52,7 +56,6 @@ import {
 } from '../core/query';
 import { Transaction as InternalTransaction } from '../core/transaction';
 import { ChangeType, ViewSnapshot } from '../core/view_snapshot';
-import { LruParams } from '../local/lru_garbage_collector';
 import { Document, MaybeDocument, NoDocument } from '../model/document';
 import { DocumentKey } from '../model/document_key';
 import { DeleteMutation, Mutation, Precondition } from '../model/mutation';
@@ -60,36 +63,18 @@ import { FieldPath, ResourcePath } from '../model/path';
 import { isServerTimestamp } from '../model/server_timestamps';
 import { refValue } from '../model/values';
 import { debugAssert, fail } from '../util/assert';
-import { AsyncQueue } from '../util/async_queue';
 import { Code, FirestoreError } from '../util/error';
 import {
-  invalidClassError,
-  validateArgType,
-  validateAtLeastNumberOfArgs,
-  validateBetweenNumberOfArgs,
-  validateDefined,
-  validateExactNumberOfArgs,
-  validateNamedOptionalPropertyEquals,
-  validateNamedOptionalType,
-  validateNamedType,
-  validateOptionalArgType,
-  validateOptionalArrayElements,
-  validateOptionNames,
+  cast,
+  validateIsNotUsedTogether,
+  validateNonEmptyArgument,
   validatePositiveNumber,
-  validateStringEnum,
+  validateSetOptions,
   valueDescription
 } from '../util/input_validation';
-import { getLogLevel, logError, LogLevel, setLogLevel } from '../util/log';
+import { logWarn, setLogLevel as setClientLogLevel } from '../util/log';
 import { AutoId } from '../util/misc';
-import { Deferred } from '../util/promise';
-import { FieldPath as ExternalFieldPath } from './field_path';
-import {
-  CredentialsProvider,
-  CredentialsSettings,
-  EmptyCredentialsProvider,
-  FirebaseCredentialsProvider,
-  makeCredentialsProvider
-} from './credentials';
+import { FieldPath as ExpFieldPath } from '../../lite/src/api/field_path';
 import {
   CompleteFn,
   ErrorFn,
@@ -99,7 +84,6 @@ import {
   Unsubscribe
 } from './observer';
 import {
-  DocumentKeyReference,
   fieldPathFromArgument,
   parseQueryValue,
   parseSetData,
@@ -109,357 +93,228 @@ import {
   UserDataReader
 } from './user_data_reader';
 import { UserDataWriter } from './user_data_writer';
-import { FirebaseAuthInternalName } from '@firebase/auth-interop-types';
-import { Provider } from '@firebase/component';
+import {
+  clearIndexedDbPersistence,
+  disableNetwork,
+  enableIndexedDbPersistence,
+  enableMultiTabIndexedDbPersistence,
+  enableNetwork,
+  FirebaseFirestore,
+  terminate,
+  waitForPendingWrites,
+  FirebaseFirestore as ExpFirebaseFirestore
+} from '../../exp/src/api/database';
+import {
+  DocumentSnapshot as ExpDocumentSnapshot,
+  QueryDocumentSnapshot as ExpQueryDocumentSnapshot,
+  snapshotEqual
+} from '../../exp/src/api/snapshot';
+import {
+  DocumentReference as ExpDocumentReference,
+  refEqual,
+  newUserDataReader
+} from '../../lite/src/api/reference';
+import {
+  onSnapshotsInSync,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  getDocFromCache,
+  getDocFromServer,
+  getDoc,
+  onSnapshot
+} from '../../exp/src/api/reference';
+import { LRU_COLLECTION_DISABLED } from '../local/lru_garbage_collector';
+import { Compat } from '../compat/compat';
 
-// settings() defaults:
-const DEFAULT_HOST = 'firestore.googleapis.com';
-const DEFAULT_SSL = true;
-const DEFAULT_TIMESTAMPS_IN_SNAPSHOTS = true;
-const DEFAULT_FORCE_LONG_POLLING = false;
-const DEFAULT_IGNORE_UNDEFINED_PROPERTIES = false;
+import {
+  CollectionReference as PublicCollectionReference,
+  DocumentChange as PublicDocumentChange,
+  DocumentChangeType as PublicDocumentChangeType,
+  DocumentData as PublicDocumentData,
+  DocumentReference as PublicDocumentReference,
+  DocumentSnapshot as PublicDocumentSnapshot,
+  FieldPath as PublicFieldPath,
+  FirebaseFirestore as PublicFirestore,
+  FirestoreDataConverter as PublicFirestoreDataConverter,
+  GetOptions as PublicGetOptions,
+  LogLevel as PublicLogLevel,
+  OrderByDirection as PublicOrderByDirection,
+  PersistenceSettings as PublicPersistenceSettings,
+  Query as PublicQuery,
+  QueryDocumentSnapshot as PublicQueryDocumentSnapshot,
+  QuerySnapshot as PublicQuerySnapshot,
+  SetOptions as PublicSetOptions,
+  Settings as PublicSettings,
+  SnapshotListenOptions as PublicSnapshotListenOptions,
+  SnapshotMetadata as PublicSnapshotMetadata,
+  SnapshotOptions as PublicSnapshotOptions,
+  Transaction as PublicTransaction,
+  UpdateData as PublicUpdateData,
+  WhereFilterOp as PublicWhereFilterOp,
+  WriteBatch as PublicWriteBatch
+} from '@firebase/firestore-types';
+
+import { makeDatabaseInfo } from '../../lite/src/api/database';
+import { DEFAULT_HOST } from '../../lite/src/api/components';
 
 /**
  * Constant used to indicate the LRU garbage collection should be disabled.
  * Set this value as the `cacheSizeBytes` on the settings passed to the
  * `Firestore` instance.
  */
-export const CACHE_SIZE_UNLIMITED = LruParams.COLLECTION_DISABLED;
-
-// enablePersistence() defaults:
-const DEFAULT_SYNCHRONIZE_TABS = false;
-
-/** Undocumented, private additional settings not exposed in our public API. */
-interface PrivateSettings extends firestore.Settings {
-  // Can be a google-auth-library or gapi client.
-  credentials?: CredentialsSettings;
-}
+export const CACHE_SIZE_UNLIMITED = LRU_COLLECTION_DISABLED;
 
 /**
- * Options that can be provided in the Firestore constructor when not using
- * Firebase (aka standalone mode).
+ * A persistence provider for either memory-only or IndexedDB persistence.
+ * Mainly used to allow optional inclusion of IndexedDB code.
  */
-export interface FirestoreDatabase {
-  projectId: string;
-  database?: string;
+export interface PersistenceProvider {
+  enableIndexedDbPersistence(
+    firestore: Firestore,
+    forceOwnership: boolean
+  ): Promise<void>;
+  enableMultiTabIndexedDbPersistence(firestore: Firestore): Promise<void>;
+  clearIndexedDbPersistence(firestore: Firestore): Promise<void>;
 }
 
+const MEMORY_ONLY_PERSISTENCE_ERROR_MESSAGE =
+  'You are using the memory-only build of Firestore. Persistence support is ' +
+  'only available via the @firebase/firestore bundle or the ' +
+  'firebase-firestore.js build.';
+
 /**
- * A concrete type describing all the values that can be applied via a
- * user-supplied firestore.Settings object. This is a separate type so that
- * defaults can be supplied and the value can be checked for equality.
+ * The persistence provider included with the memory-only SDK. This provider
+ * errors for all attempts to access persistence.
  */
-class FirestoreSettings {
-  /** The hostname to connect to. */
-  readonly host: string;
-
-  /** Whether to use SSL when connecting. */
-  readonly ssl: boolean;
-
-  readonly timestampsInSnapshots: boolean;
-
-  readonly cacheSizeBytes: number;
-
-  readonly forceLongPolling: boolean;
-
-  readonly ignoreUndefinedProperties: boolean;
-
-  // Can be a google-auth-library or gapi client.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  credentials?: any;
-
-  constructor(settings: PrivateSettings) {
-    if (settings.host === undefined) {
-      if (settings.ssl !== undefined) {
-        throw new FirestoreError(
-          Code.INVALID_ARGUMENT,
-          "Can't provide ssl option if host option is not set"
-        );
-      }
-      this.host = DEFAULT_HOST;
-      this.ssl = DEFAULT_SSL;
-    } else {
-      validateNamedType('settings', 'non-empty string', 'host', settings.host);
-      this.host = settings.host;
-
-      validateNamedOptionalType('settings', 'boolean', 'ssl', settings.ssl);
-      this.ssl = settings.ssl ?? DEFAULT_SSL;
-    }
-    validateOptionNames('settings', settings, [
-      'host',
-      'ssl',
-      'credentials',
-      'timestampsInSnapshots',
-      'cacheSizeBytes',
-      'experimentalForceLongPolling',
-      'ignoreUndefinedProperties'
-    ]);
-
-    validateNamedOptionalType(
-      'settings',
-      'object',
-      'credentials',
-      settings.credentials
+export class MemoryPersistenceProvider implements PersistenceProvider {
+  enableIndexedDbPersistence(
+    firestore: Firestore,
+    forceOwnership: boolean
+  ): Promise<void> {
+    throw new FirestoreError(
+      Code.FAILED_PRECONDITION,
+      MEMORY_ONLY_PERSISTENCE_ERROR_MESSAGE
     );
-    this.credentials = settings.credentials;
-
-    validateNamedOptionalType(
-      'settings',
-      'boolean',
-      'timestampsInSnapshots',
-      settings.timestampsInSnapshots
-    );
-
-    validateNamedOptionalType(
-      'settings',
-      'boolean',
-      'ignoreUndefinedProperties',
-      settings.ignoreUndefinedProperties
-    );
-
-    // Nobody should set timestampsInSnapshots anymore, but the error depends on
-    // whether they set it to true or false...
-    if (settings.timestampsInSnapshots === true) {
-      logError(
-        "The setting 'timestampsInSnapshots: true' is no longer required " +
-          'and should be removed.'
-      );
-    } else if (settings.timestampsInSnapshots === false) {
-      logError(
-        "Support for 'timestampsInSnapshots: false' will be removed soon. " +
-          'You must update your code to handle Timestamp objects.'
-      );
-    }
-    this.timestampsInSnapshots =
-      settings.timestampsInSnapshots ?? DEFAULT_TIMESTAMPS_IN_SNAPSHOTS;
-    this.ignoreUndefinedProperties =
-      settings.ignoreUndefinedProperties ?? DEFAULT_IGNORE_UNDEFINED_PROPERTIES;
-
-    validateNamedOptionalType(
-      'settings',
-      'number',
-      'cacheSizeBytes',
-      settings.cacheSizeBytes
-    );
-    if (settings.cacheSizeBytes === undefined) {
-      this.cacheSizeBytes = LruParams.DEFAULT_CACHE_SIZE_BYTES;
-    } else {
-      if (
-        settings.cacheSizeBytes !== CACHE_SIZE_UNLIMITED &&
-        settings.cacheSizeBytes < LruParams.MINIMUM_CACHE_SIZE_BYTES
-      ) {
-        throw new FirestoreError(
-          Code.INVALID_ARGUMENT,
-          `cacheSizeBytes must be at least ${LruParams.MINIMUM_CACHE_SIZE_BYTES}`
-        );
-      } else {
-        this.cacheSizeBytes = settings.cacheSizeBytes;
-      }
-    }
-
-    validateNamedOptionalType(
-      'settings',
-      'boolean',
-      'experimentalForceLongPolling',
-      settings.experimentalForceLongPolling
-    );
-    this.forceLongPolling =
-      settings.experimentalForceLongPolling ?? DEFAULT_FORCE_LONG_POLLING;
   }
 
-  isEqual(other: FirestoreSettings): boolean {
-    return (
-      this.host === other.host &&
-      this.ssl === other.ssl &&
-      this.timestampsInSnapshots === other.timestampsInSnapshots &&
-      this.credentials === other.credentials &&
-      this.cacheSizeBytes === other.cacheSizeBytes &&
-      this.forceLongPolling === other.forceLongPolling &&
-      this.ignoreUndefinedProperties === other.ignoreUndefinedProperties
+  enableMultiTabIndexedDbPersistence(firestore: Firestore): Promise<void> {
+    throw new FirestoreError(
+      Code.FAILED_PRECONDITION,
+      MEMORY_ONLY_PERSISTENCE_ERROR_MESSAGE
+    );
+  }
+
+  clearIndexedDbPersistence(firestore: Firestore): Promise<void> {
+    throw new FirestoreError(
+      Code.FAILED_PRECONDITION,
+      MEMORY_ONLY_PERSISTENCE_ERROR_MESSAGE
     );
   }
 }
 
 /**
- * The root reference to the database.
+ * The persistence provider included with the full Firestore SDK.
  */
-export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
-  // The objects that are a part of this API are exposed to third-parties as
-  // compiled javascript so we want to flag our private members with a leading
-  // underscore to discourage their use.
-  readonly _databaseId: DatabaseId;
-  private readonly _persistenceKey: string;
-  private _credentials: CredentialsProvider;
-  private readonly _firebaseApp: FirebaseApp | null = null;
-  private _settings: FirestoreSettings;
+export class IndexedDbPersistenceProvider implements PersistenceProvider {
+  enableIndexedDbPersistence(
+    firestore: Firestore,
+    forceOwnership: boolean
+  ): Promise<void> {
+    return enableIndexedDbPersistence(firestore._delegate, { forceOwnership });
+  }
+  enableMultiTabIndexedDbPersistence(firestore: Firestore): Promise<void> {
+    return enableMultiTabIndexedDbPersistence(firestore._delegate);
+  }
+  clearIndexedDbPersistence(firestore: Firestore): Promise<void> {
+    return clearIndexedDbPersistence(firestore._delegate);
+  }
+}
 
-  // The firestore client instance. This will be available as soon as
-  // configureClient is called, but any calls against it will block until
-  // setup has completed.
-  //
-  // Operations on the _firestoreClient don't block on _firestoreReady. Those
-  // are already set to synchronize on the async queue.
-  private _firestoreClient: FirestoreClient | undefined;
-
-  // Public for use in tests.
-  // TODO(mikelehen): Use modularized initialization instead.
-  readonly _queue = new AsyncQueue();
-
-  _userDataReader: UserDataReader | undefined;
-
-  // Note: We are using `MemoryComponentProvider` as a default
-  // ComponentProvider to ensure backwards compatibility with the format
-  // expected by the console build.
+/**
+ * Compat class for Firestore. Exposes Firestore Legacy API, but delegates
+ * to the functional API of firestore-exp.
+ */
+export class Firestore
+  extends Compat<ExpFirebaseFirestore>
+  implements PublicFirestore, FirebaseService {
+  _appCompat?: FirebaseApp;
   constructor(
-    databaseIdOrApp: FirestoreDatabase | FirebaseApp,
-    authProvider: Provider<FirebaseAuthInternalName>,
-    private _offlineComponentProvider: OfflineComponentProvider = new MemoryOfflineComponentProvider(),
-    private _onlineComponentProvider = new OnlineComponentProvider()
+    databaseIdOrApp: DatabaseId | FirebaseApp,
+    delegate: ExpFirebaseFirestore,
+    private _persistenceProvider: PersistenceProvider
   ) {
-    if (typeof (databaseIdOrApp as FirebaseApp).options === 'object') {
-      // This is very likely a Firebase app object
-      // TODO(b/34177605): Can we somehow use instanceof?
-      const app = databaseIdOrApp as FirebaseApp;
-      this._firebaseApp = app;
-      this._databaseId = Firestore.databaseIdFromApp(app);
-      this._persistenceKey = app.name;
-      this._credentials = new FirebaseCredentialsProvider(authProvider);
-    } else {
-      const external = databaseIdOrApp as FirestoreDatabase;
-      if (!external.projectId) {
-        throw new FirestoreError(
-          Code.INVALID_ARGUMENT,
-          'Must provide projectId'
-        );
-      }
+    super(delegate);
 
-      this._databaseId = new DatabaseId(external.projectId, external.database);
-      // Use a default persistenceKey that lines up with FirebaseApp.
-      this._persistenceKey = '[DEFAULT]';
-      this._credentials = new EmptyCredentialsProvider();
+    if (!(databaseIdOrApp instanceof DatabaseId)) {
+      this._appCompat = databaseIdOrApp as FirebaseApp;
     }
-
-    this._settings = new FirestoreSettings({});
   }
 
-  get _dataReader(): UserDataReader {
-    debugAssert(
-      !!this._firestoreClient,
-      'Cannot obtain UserDataReader before instance is intitialized'
-    );
-    if (!this._userDataReader) {
-      // Lazy initialize UserDataReader once the settings are frozen
-      this._userDataReader = new UserDataReader(
-        this._databaseId,
-        this._settings.ignoreUndefinedProperties
-      );
-    }
-    return this._userDataReader;
+  get _databaseId(): DatabaseId {
+    return this._delegate._databaseId;
   }
 
-  settings(settingsLiteral: firestore.Settings): void {
-    validateExactNumberOfArgs('Firestore.settings', arguments, 1);
-    validateArgType('Firestore.settings', 'object', 1, settingsLiteral);
+  settings(settingsLiteral: PublicSettings): void {
+    if (settingsLiteral.merge) {
+      settingsLiteral = {
+        ...this._delegate._getSettings(),
+        ...settingsLiteral
+      };
+      // Remove the property from the settings once the merge is completed
+      delete settingsLiteral.merge;
+    }
+    this._delegate._setSettings(settingsLiteral);
+  }
 
-    const newSettings = new FirestoreSettings(settingsLiteral);
-    if (this._firestoreClient && !this._settings.isEqual(newSettings)) {
-      throw new FirestoreError(
-        Code.FAILED_PRECONDITION,
-        'Firestore has already been started and its settings can no longer ' +
-          'be changed. You can only call settings() before calling any other ' +
-          'methods on a Firestore object.'
+  useEmulator(host: string, port: number): void {
+    if (this._delegate._getSettings().host !== DEFAULT_HOST) {
+      logWarn(
+        'Host has been set in both settings() and useEmulator(), emulator host will be used'
       );
     }
 
-    this._settings = newSettings;
-    if (newSettings.credentials !== undefined) {
-      this._credentials = makeCredentialsProvider(newSettings.credentials);
-    }
+    this.settings({
+      host: `${host}:${port}`,
+      ssl: false,
+      merge: true
+    });
   }
 
   enableNetwork(): Promise<void> {
-    this.ensureClientConfigured();
-    return this._firestoreClient!.enableNetwork();
+    return enableNetwork(this._delegate);
   }
 
   disableNetwork(): Promise<void> {
-    this.ensureClientConfigured();
-    return this._firestoreClient!.disableNetwork();
+    return disableNetwork(this._delegate);
   }
 
-  enablePersistence(settings?: firestore.PersistenceSettings): Promise<void> {
-    if (this._firestoreClient) {
-      throw new FirestoreError(
-        Code.FAILED_PRECONDITION,
-        'Firestore has already been started and persistence can no longer ' +
-          'be enabled. You can only call enablePersistence() before calling ' +
-          'any other methods on a Firestore object.'
-      );
-    }
-
+  enablePersistence(settings?: PublicPersistenceSettings): Promise<void> {
     let synchronizeTabs = false;
     let experimentalForceOwningTab = false;
 
     if (settings) {
-      if (settings.experimentalTabSynchronization !== undefined) {
-        logError(
-          "The 'experimentalTabSynchronization' setting will be removed. Use 'synchronizeTabs' instead."
-        );
-      }
-      synchronizeTabs =
-        settings.synchronizeTabs ??
-        settings.experimentalTabSynchronization ??
-        DEFAULT_SYNCHRONIZE_TABS;
+      synchronizeTabs = !!settings.synchronizeTabs;
+      experimentalForceOwningTab = !!settings.experimentalForceOwningTab;
 
-      experimentalForceOwningTab = settings.experimentalForceOwningTab
-        ? settings.experimentalForceOwningTab
-        : false;
-
-      if (synchronizeTabs && experimentalForceOwningTab) {
-        throw new FirestoreError(
-          Code.INVALID_ARGUMENT,
-          "The 'experimentalForceOwningTab' setting cannot be used with 'synchronizeTabs'."
-        );
-      }
-    }
-
-    return this.configureClient(
-      this._offlineComponentProvider,
-      this._onlineComponentProvider,
-      {
-        durable: true,
-        cacheSizeBytes: this._settings.cacheSizeBytes,
+      validateIsNotUsedTogether(
+        'synchronizeTabs',
         synchronizeTabs,
-        forceOwningTab: experimentalForceOwningTab
-      }
-    );
-  }
-
-  async clearPersistence(): Promise<void> {
-    if (
-      this._firestoreClient !== undefined &&
-      !this._firestoreClient.clientTerminated
-    ) {
-      throw new FirestoreError(
-        Code.FAILED_PRECONDITION,
-        'Persistence can only be cleared before a Firestore instance is ' +
-          'initialized or after it is terminated.'
+        'experimentalForceOwningTab',
+        experimentalForceOwningTab
       );
     }
 
-    const deferred = new Deferred<void>();
-    this._queue.enqueueAndForgetEvenAfterShutdown(async () => {
-      try {
-        await this._offlineComponentProvider.clearPersistence(
-          this._databaseId,
-          this._persistenceKey
+    return synchronizeTabs
+      ? this._persistenceProvider.enableMultiTabIndexedDbPersistence(this)
+      : this._persistenceProvider.enableIndexedDbPersistence(
+          this,
+          experimentalForceOwningTab
         );
-        deferred.resolve();
-      } catch (e) {
-        deferred.reject(e);
-      }
-    });
-    return deferred.promise;
+  }
+
+  clearPersistence(): Promise<void> {
+    return this._persistenceProvider.clearIndexedDbPersistence(this);
   }
 
   terminate(): Promise<void> {
@@ -467,125 +322,34 @@ export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
     return this.INTERNAL.delete();
   }
 
-  get _isTerminated(): boolean {
-    this.ensureClientConfigured();
-    return this._firestoreClient!.clientTerminated;
-  }
-
   waitForPendingWrites(): Promise<void> {
-    this.ensureClientConfigured();
-    return this._firestoreClient!.waitForPendingWrites();
+    return waitForPendingWrites(this._delegate);
   }
 
   onSnapshotsInSync(observer: PartialObserver<void>): Unsubscribe;
   onSnapshotsInSync(onSync: () => void): Unsubscribe;
   onSnapshotsInSync(arg: unknown): Unsubscribe {
-    this.ensureClientConfigured();
-
-    if (isPartialObserver(arg)) {
-      return this._firestoreClient!.addSnapshotsInSyncListener(
-        arg as PartialObserver<void>
-      );
-    } else {
-      validateArgType('Firestore.onSnapshotsInSync', 'function', 1, arg);
-      const observer: PartialObserver<void> = {
-        next: arg as () => void
-      };
-      return this._firestoreClient!.addSnapshotsInSyncListener(observer);
-    }
-  }
-
-  ensureClientConfigured(): FirestoreClient {
-    if (!this._firestoreClient) {
-      // Kick off starting the client but don't actually wait for it.
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      this.configureClient(
-        new MemoryOfflineComponentProvider(),
-        new OnlineComponentProvider(),
-        {
-          durable: false
-        }
-      );
-    }
-    return this._firestoreClient as FirestoreClient;
-  }
-
-  private makeDatabaseInfo(): DatabaseInfo {
-    return new DatabaseInfo(
-      this._databaseId,
-      this._persistenceKey,
-      this._settings.host,
-      this._settings.ssl,
-      this._settings.forceLongPolling
-    );
-  }
-
-  private configureClient(
-    offlineComponentProvider: OfflineComponentProvider,
-    onlineComponentProvider: OnlineComponentProvider,
-    persistenceSettings: PersistenceSettings
-  ): Promise<void> {
-    debugAssert(!!this._settings.host, 'FirestoreSettings.host is not set');
-
-    debugAssert(
-      !this._firestoreClient,
-      'configureClient() called multiple times'
-    );
-
-    const databaseInfo = this.makeDatabaseInfo();
-
-    this._firestoreClient = new FirestoreClient(this._credentials, this._queue);
-
-    return this._firestoreClient.start(
-      databaseInfo,
-      offlineComponentProvider,
-      onlineComponentProvider,
-      persistenceSettings
-    );
-  }
-
-  private static databaseIdFromApp(app: FirebaseApp): DatabaseId {
-    if (!contains(app.options, 'projectId')) {
-      throw new FirestoreError(
-        Code.INVALID_ARGUMENT,
-        '"projectId" not provided in firebase.initializeApp.'
-      );
-    }
-
-    const projectId = app.options.projectId;
-    if (!projectId || typeof projectId !== 'string') {
-      throw new FirestoreError(
-        Code.INVALID_ARGUMENT,
-        'projectId must be a string in FirebaseApp.options'
-      );
-    }
-    return new DatabaseId(projectId);
+    return onSnapshotsInSync(this._delegate, arg as PartialObserver<void>);
   }
 
   get app(): FirebaseApp {
-    if (!this._firebaseApp) {
+    if (!this._appCompat) {
       throw new FirestoreError(
         Code.FAILED_PRECONDITION,
         "Firestore was not initialized using the Firebase SDK. 'app' is " +
           'not available'
       );
     }
-    return this._firebaseApp;
+    return this._appCompat as FirebaseApp;
   }
 
   INTERNAL = {
-    delete: async (): Promise<void> => {
-      // The client must be initalized to ensure that all subsequent API usage
-      // throws an exception.
-      this.ensureClientConfigured();
-      await this._firestoreClient!.terminate();
-    }
+    delete: () => terminate(this._delegate)
   };
 
-  collection(pathString: string): firestore.CollectionReference {
-    validateExactNumberOfArgs('Firestore.collection', arguments, 1);
-    validateArgType('Firestore.collection', 'non-empty string', 1, pathString);
-    this.ensureClientConfigured();
+  collection(pathString: string): PublicCollectionReference {
+    validateNonEmptyArgument('Firestore.collection', 'path', pathString);
+    ensureFirestoreConfigured(this._delegate);
     return new CollectionReference(
       ResourcePath.fromString(pathString),
       this,
@@ -593,10 +357,9 @@ export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
     );
   }
 
-  doc(pathString: string): firestore.DocumentReference {
-    validateExactNumberOfArgs('Firestore.doc', arguments, 1);
-    validateArgType('Firestore.doc', 'non-empty string', 1, pathString);
-    this.ensureClientConfigured();
+  doc(pathString: string): PublicDocumentReference {
+    validateNonEmptyArgument('Firestore.doc', 'path', pathString);
+    ensureFirestoreConfigured(this._delegate);
     return DocumentReference.forPath(
       ResourcePath.fromString(pathString),
       this,
@@ -604,12 +367,10 @@ export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
     );
   }
 
-  collectionGroup(collectionId: string): firestore.Query {
-    validateExactNumberOfArgs('Firestore.collectionGroup', arguments, 1);
-    validateArgType(
+  collectionGroup(collectionId: string): PublicQuery {
+    validateNonEmptyArgument(
       'Firestore.collectionGroup',
-      'non-empty string',
-      1,
+      'collectionId',
       collectionId
     );
     if (collectionId.indexOf('/') >= 0) {
@@ -619,7 +380,7 @@ export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
           `Firestore.collectionGroup(). Collection IDs must not contain '/'.`
       );
     }
-    this.ensureClientConfigured();
+    ensureFirestoreConfigured(this._delegate);
     return new Query(
       newQueryForCollectionGroup(collectionId),
       this,
@@ -628,79 +389,79 @@ export class Firestore implements firestore.FirebaseFirestore, FirebaseService {
   }
 
   runTransaction<T>(
-    updateFunction: (transaction: firestore.Transaction) => Promise<T>
+    updateFunction: (transaction: PublicTransaction) => Promise<T>
   ): Promise<T> {
-    validateExactNumberOfArgs('Firestore.runTransaction', arguments, 1);
-    validateArgType('Firestore.runTransaction', 'function', 1, updateFunction);
-    return this.ensureClientConfigured().transaction(
+    const client = ensureFirestoreConfigured(this._delegate);
+    return firestoreClientTransaction(
+      client,
       (transaction: InternalTransaction) => {
         return updateFunction(new Transaction(this, transaction));
       }
     );
   }
 
-  batch(): firestore.WriteBatch {
-    this.ensureClientConfigured();
-
+  batch(): PublicWriteBatch {
+    ensureFirestoreConfigured(this._delegate);
     return new WriteBatch(this);
   }
+}
 
-  static get logLevel(): firestore.LogLevel {
-    switch (getLogLevel()) {
-      case LogLevel.DEBUG:
-        return 'debug';
-      case LogLevel.ERROR:
-        return 'error';
-      case LogLevel.SILENT:
-        return 'silent';
-      case LogLevel.WARN:
-        return 'warn';
-      case LogLevel.INFO:
-        return 'info';
-      case LogLevel.VERBOSE:
-        return 'verbose';
-      default:
-        // The default log level is error
-        return 'error';
-    }
+export function ensureFirestoreConfigured(
+  firestore: FirebaseFirestore
+): FirestoreClient {
+  if (!firestore._firestoreClient) {
+    configureFirestore(firestore);
   }
+  firestore._firestoreClient!.verifyNotTerminated();
+  return firestore._firestoreClient as FirestoreClient;
+}
 
-  static setLogLevel(level: firestore.LogLevel): void {
-    validateExactNumberOfArgs('Firestore.setLogLevel', arguments, 1);
-    validateStringEnum(
-      'setLogLevel',
-      ['debug', 'error', 'silent', 'warn', 'info', 'verbose'],
-      1,
-      level
-    );
-    setLogLevel(level);
-  }
+export function configureFirestore(firestore: FirebaseFirestore): void {
+  const settings = firestore._freezeSettings();
+  debugAssert(!!settings.host, 'FirestoreSettings.host is not set');
+  debugAssert(
+    !firestore._firestoreClient,
+    'configureFirestore() called multiple times'
+  );
 
-  // Note: this is not a property because the minifier can't work correctly with
-  // the way TypeScript compiler outputs properties.
-  _areTimestampsInSnapshotsEnabled(): boolean {
-    return this._settings.timestampsInSnapshots;
-  }
+  const databaseInfo = makeDatabaseInfo(
+    firestore._databaseId,
+    firestore._persistenceKey,
+    settings
+  );
+  firestore._firestoreClient = new FirestoreClient(
+    firestore._credentials,
+    firestore._queue,
+    databaseInfo
+  );
+}
+
+export function setLogLevel(level: PublicLogLevel): void {
+  setClientLogLevel(level);
 }
 
 /**
  * A reference to a transaction.
  */
-export class Transaction implements firestore.Transaction {
+export class Transaction implements PublicTransaction {
+  private _dataReader: UserDataReader;
+
   constructor(
     private _firestore: Firestore,
     private _transaction: InternalTransaction
-  ) {}
+  ) {
+    this._dataReader = newUserDataReader(this._firestore._delegate);
+  }
 
   get<T>(
-    documentRef: firestore.DocumentReference<T>
-  ): Promise<firestore.DocumentSnapshot<T>> {
-    validateExactNumberOfArgs('Transaction.get', arguments, 1);
+    documentRef: PublicDocumentReference<T>
+  ): Promise<PublicDocumentSnapshot<T>> {
     const ref = validateReference(
       'Transaction.get',
       documentRef,
       this._firestore
     );
+    const userDataWriter = new UserDataWriter(this._firestore);
     return this._transaction
       .lookup([ref._key])
       .then((docs: MaybeDocument[]) => {
@@ -711,20 +472,32 @@ export class Transaction implements firestore.Transaction {
         if (doc instanceof NoDocument) {
           return new DocumentSnapshot<T>(
             this._firestore,
-            ref._key,
-            null,
-            /* fromCache= */ false,
-            /* hasPendingWrites= */ false,
-            ref._converter
+            new ExpDocumentSnapshot(
+              this._firestore._delegate,
+              userDataWriter,
+              ref._key,
+              null,
+              new SnapshotMetadata(
+                /*hasPendingWrites= */ false,
+                /* fromCache= */ false
+              ),
+              ref._converter
+            )
           );
         } else if (doc instanceof Document) {
           return new DocumentSnapshot<T>(
             this._firestore,
-            ref._key,
-            doc,
-            /* fromCache= */ false,
-            /* hasPendingWrites= */ false,
-            ref._converter
+            new ExpDocumentSnapshot(
+              this._firestore._delegate,
+              userDataWriter,
+              ref._key,
+              doc,
+              new SnapshotMetadata(
+                /*hasPendingWrites= */ false,
+                /* fromCache= */ false
+              ),
+              ref._converter
+            )
           );
         } else {
           throw fail(
@@ -737,15 +510,14 @@ export class Transaction implements firestore.Transaction {
   set<T>(
     documentRef: DocumentReference<T>,
     data: Partial<T>,
-    options: firestore.SetOptions
+    options: PublicSetOptions
   ): Transaction;
   set<T>(documentRef: DocumentReference<T>, data: T): Transaction;
   set<T>(
-    documentRef: firestore.DocumentReference<T>,
+    documentRef: PublicDocumentReference<T>,
     value: T | Partial<T>,
-    options?: firestore.SetOptions
+    options?: PublicSetOptions
   ): Transaction {
-    validateBetweenNumberOfArgs('Transaction.set', arguments, 2, 3);
     const ref = validateReference(
       'Transaction.set',
       documentRef,
@@ -758,7 +530,7 @@ export class Transaction implements firestore.Transaction {
       options
     );
     const parsed = parseSetData(
-      this._firestore._dataReader,
+      this._dataReader,
       'Transaction.set',
       ref._key,
       convertedValue,
@@ -770,36 +542,40 @@ export class Transaction implements firestore.Transaction {
   }
 
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    value: firestore.UpdateData
+    documentRef: PublicDocumentReference<unknown>,
+    value: PublicUpdateData
   ): Transaction;
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    field: string | ExternalFieldPath,
+    documentRef: PublicDocumentReference<unknown>,
+    field: string | PublicFieldPath,
     value: unknown,
     ...moreFieldsAndValues: unknown[]
   ): Transaction;
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    fieldOrUpdateData: string | ExternalFieldPath | firestore.UpdateData,
+    documentRef: PublicDocumentReference<unknown>,
+    fieldOrUpdateData: string | PublicFieldPath | PublicUpdateData,
     value?: unknown,
     ...moreFieldsAndValues: unknown[]
   ): Transaction {
-    let ref;
-    let parsed;
+    const ref = validateReference(
+      'Transaction.update',
+      documentRef,
+      this._firestore
+    );
 
+    // For Compat types, we have to "extract" the underlying types before
+    // performing validation.
+    if (fieldOrUpdateData instanceof Compat) {
+      fieldOrUpdateData = (fieldOrUpdateData as Compat<ExpFieldPath>)._delegate;
+    }
+
+    let parsed;
     if (
       typeof fieldOrUpdateData === 'string' ||
-      fieldOrUpdateData instanceof ExternalFieldPath
+      fieldOrUpdateData instanceof ExpFieldPath
     ) {
-      validateAtLeastNumberOfArgs('Transaction.update', arguments, 3);
-      ref = validateReference(
-        'Transaction.update',
-        documentRef,
-        this._firestore
-      );
       parsed = parseUpdateVarargs(
-        this._firestore._dataReader,
+        this._dataReader,
         'Transaction.update',
         ref._key,
         fieldOrUpdateData,
@@ -807,14 +583,8 @@ export class Transaction implements firestore.Transaction {
         moreFieldsAndValues
       );
     } else {
-      validateExactNumberOfArgs('Transaction.update', arguments, 2);
-      ref = validateReference(
-        'Transaction.update',
-        documentRef,
-        this._firestore
-      );
       parsed = parseUpdateData(
-        this._firestore._dataReader,
+        this._dataReader,
         'Transaction.update',
         ref._key,
         fieldOrUpdateData
@@ -825,8 +595,7 @@ export class Transaction implements firestore.Transaction {
     return this;
   }
 
-  delete(documentRef: firestore.DocumentReference<unknown>): Transaction {
-    validateExactNumberOfArgs('Transaction.delete', arguments, 1);
+  delete(documentRef: PublicDocumentReference<unknown>): Transaction {
     const ref = validateReference(
       'Transaction.delete',
       documentRef,
@@ -837,24 +606,26 @@ export class Transaction implements firestore.Transaction {
   }
 }
 
-export class WriteBatch implements firestore.WriteBatch {
+export class WriteBatch implements PublicWriteBatch {
   private _mutations = [] as Mutation[];
   private _committed = false;
+  private _dataReader: UserDataReader;
 
-  constructor(private _firestore: Firestore) {}
+  constructor(private _firestore: Firestore) {
+    this._dataReader = newUserDataReader(this._firestore._delegate);
+  }
 
   set<T>(
     documentRef: DocumentReference<T>,
     data: Partial<T>,
-    options: firestore.SetOptions
+    options: PublicSetOptions
   ): WriteBatch;
   set<T>(documentRef: DocumentReference<T>, data: T): WriteBatch;
   set<T>(
-    documentRef: firestore.DocumentReference<T>,
+    documentRef: PublicDocumentReference<T>,
     value: T | Partial<T>,
-    options?: firestore.SetOptions
+    options?: PublicSetOptions
   ): WriteBatch {
-    validateBetweenNumberOfArgs('WriteBatch.set', arguments, 2, 3);
     this.verifyNotCommitted();
     const ref = validateReference(
       'WriteBatch.set',
@@ -868,7 +639,7 @@ export class WriteBatch implements firestore.WriteBatch {
       options
     );
     const parsed = parseSetData(
-      this._firestore._dataReader,
+      this._dataReader,
       'WriteBatch.set',
       ref._key,
       convertedValue,
@@ -882,38 +653,41 @@ export class WriteBatch implements firestore.WriteBatch {
   }
 
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    value: firestore.UpdateData
+    documentRef: PublicDocumentReference<unknown>,
+    value: PublicUpdateData
   ): WriteBatch;
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    field: string | ExternalFieldPath,
+    documentRef: PublicDocumentReference<unknown>,
+    field: string | PublicFieldPath,
     value: unknown,
     ...moreFieldsAndValues: unknown[]
   ): WriteBatch;
   update(
-    documentRef: firestore.DocumentReference<unknown>,
-    fieldOrUpdateData: string | ExternalFieldPath | firestore.UpdateData,
+    documentRef: PublicDocumentReference<unknown>,
+    fieldOrUpdateData: string | PublicFieldPath | PublicUpdateData,
     value?: unknown,
     ...moreFieldsAndValues: unknown[]
   ): WriteBatch {
     this.verifyNotCommitted();
+    const ref = validateReference(
+      'WriteBatch.update',
+      documentRef,
+      this._firestore
+    );
 
-    let ref;
+    // For Compat types, we have to "extract" the underlying types before
+    // performing validation.
+    if (fieldOrUpdateData instanceof Compat) {
+      fieldOrUpdateData = (fieldOrUpdateData as Compat<ExpFieldPath>)._delegate;
+    }
+
     let parsed;
-
     if (
       typeof fieldOrUpdateData === 'string' ||
-      fieldOrUpdateData instanceof ExternalFieldPath
+      fieldOrUpdateData instanceof ExpFieldPath
     ) {
-      validateAtLeastNumberOfArgs('WriteBatch.update', arguments, 3);
-      ref = validateReference(
-        'WriteBatch.update',
-        documentRef,
-        this._firestore
-      );
       parsed = parseUpdateVarargs(
-        this._firestore._dataReader,
+        this._dataReader,
         'WriteBatch.update',
         ref._key,
         fieldOrUpdateData,
@@ -921,14 +695,8 @@ export class WriteBatch implements firestore.WriteBatch {
         moreFieldsAndValues
       );
     } else {
-      validateExactNumberOfArgs('WriteBatch.update', arguments, 2);
-      ref = validateReference(
-        'WriteBatch.update',
-        documentRef,
-        this._firestore
-      );
       parsed = parseUpdateData(
-        this._firestore._dataReader,
+        this._dataReader,
         'WriteBatch.update',
         ref._key,
         fieldOrUpdateData
@@ -941,8 +709,7 @@ export class WriteBatch implements firestore.WriteBatch {
     return this;
   }
 
-  delete(documentRef: firestore.DocumentReference<unknown>): WriteBatch {
-    validateExactNumberOfArgs('WriteBatch.delete', arguments, 1);
+  delete(documentRef: PublicDocumentReference<unknown>): WriteBatch {
     this.verifyNotCommitted();
     const ref = validateReference(
       'WriteBatch.delete',
@@ -959,7 +726,8 @@ export class WriteBatch implements firestore.WriteBatch {
     this.verifyNotCommitted();
     this._committed = true;
     if (this._mutations.length > 0) {
-      return this._firestore.ensureClientConfigured().write(this._mutations);
+      const client = ensureFirestoreConfigured(this._firestore._delegate);
+      return firestoreClientWrite(client, this._mutations);
     }
 
     return Promise.resolve();
@@ -979,24 +747,23 @@ export class WriteBatch implements firestore.WriteBatch {
 /**
  * A reference to a particular document in a collection in the database.
  */
-export class DocumentReference<T = firestore.DocumentData>
-  extends DocumentKeyReference<T>
-  implements firestore.DocumentReference<T> {
-  private _firestoreClient: FirestoreClient;
+export class DocumentReference<T = PublicDocumentData>
+  extends Compat<ExpDocumentReference<T>>
+  implements PublicDocumentReference<T> {
+  private _userDataWriter: UserDataWriter;
 
   constructor(
-    public _key: DocumentKey,
     readonly firestore: Firestore,
-    readonly _converter: firestore.FirestoreDataConverter<T> | null
+    delegate: ExpDocumentReference<T>
   ) {
-    super(firestore._databaseId, _key, _converter);
-    this._firestoreClient = this.firestore.ensureClientConfigured();
+    super(delegate);
+    this._userDataWriter = new UserDataWriter(firestore);
   }
 
   static forPath<U>(
     path: ResourcePath,
     firestore: Firestore,
-    converter: firestore.FirestoreDataConverter<U> | null
+    converter: UntypedFirestoreDataConverter<U> | null
   ): DocumentReference<U> {
     if (path.length % 2 !== 0) {
       throw new FirestoreError(
@@ -1006,33 +773,49 @@ export class DocumentReference<T = firestore.DocumentData>
           `${path.canonicalString()} has ${path.length}`
       );
     }
-    return new DocumentReference(new DocumentKey(path), firestore, converter);
+    return new DocumentReference(
+      firestore,
+      new ExpDocumentReference(
+        firestore._delegate,
+        converter,
+        new DocumentKey(path)
+      )
+    );
+  }
+
+  static forKey<U>(
+    key: DocumentKey,
+    firestore: Firestore,
+    converter: UntypedFirestoreDataConverter<U> | null
+  ): DocumentReference<U> {
+    return new DocumentReference(
+      firestore,
+      new ExpDocumentReference(firestore._delegate, converter, key)
+    );
   }
 
   get id(): string {
-    return this._key.path.lastSegment();
+    return this._delegate.id;
   }
 
-  get parent(): firestore.CollectionReference<T> {
+  get parent(): PublicCollectionReference<T> {
     return new CollectionReference(
-      this._key.path.popLast(),
+      this._delegate._path.popLast(),
       this.firestore,
-      this._converter
+      this._delegate._converter
     );
   }
 
   get path(): string {
-    return this._key.path.canonicalString();
+    return this._delegate.path;
   }
 
   collection(
     pathString: string
-  ): firestore.CollectionReference<firestore.DocumentData> {
-    validateExactNumberOfArgs('DocumentReference.collection', arguments, 1);
-    validateArgType(
+  ): PublicCollectionReference<PublicDocumentData> {
+    validateNonEmptyArgument(
       'DocumentReference.collection',
-      'non-empty string',
-      1,
+      'path',
       pathString
     );
     if (!pathString) {
@@ -1043,253 +826,249 @@ export class DocumentReference<T = firestore.DocumentData>
     }
     const path = ResourcePath.fromString(pathString);
     return new CollectionReference(
-      this._key.path.child(path),
+      this._delegate._path.child(path),
       this.firestore,
       /* converter= */ null
     );
   }
 
-  isEqual(other: firestore.DocumentReference<T>): boolean {
-    if (!(other instanceof DocumentReference)) {
-      throw invalidClassError('isEqual', 'DocumentReference', 1, other);
+  isEqual(other: PublicDocumentReference<T>): boolean {
+    if (other instanceof Compat) {
+      other = other._delegate;
     }
-    return (
-      this.firestore === other.firestore &&
-      this._key.isEqual(other._key) &&
-      this._converter === other._converter
-    );
+    if (!(other instanceof ExpDocumentReference)) {
+      return false;
+    }
+    return refEqual(this._delegate, other);
   }
 
-  set(value: Partial<T>, options: firestore.SetOptions): Promise<void>;
+  set(value: Partial<T>, options: PublicSetOptions): Promise<void>;
   set(value: T): Promise<void>;
-  set(value: T | Partial<T>, options?: firestore.SetOptions): Promise<void> {
-    validateBetweenNumberOfArgs('DocumentReference.set', arguments, 1, 2);
+  set(value: T | Partial<T>, options?: PublicSetOptions): Promise<void> {
     options = validateSetOptions('DocumentReference.set', options);
-    const convertedValue = applyFirestoreDataConverter(
-      this._converter,
-      value,
-      options
-    );
-    const parsed = parseSetData(
-      this.firestore._dataReader,
-      'DocumentReference.set',
-      this._key,
-      convertedValue,
-      this._converter !== null,
-      options
-    );
-    return this._firestoreClient.write(
-      parsed.toMutations(this._key, Precondition.none())
-    );
+    try {
+      return setDoc(this._delegate, value, options);
+    } catch (e) {
+      throw replaceFunctionName(e, 'setDoc', 'DocumentReference.set');
+    }
   }
 
-  update(value: firestore.UpdateData): Promise<void>;
+  update(value: PublicUpdateData): Promise<void>;
   update(
-    field: string | ExternalFieldPath,
+    field: string | PublicFieldPath,
     value: unknown,
     ...moreFieldsAndValues: unknown[]
   ): Promise<void>;
   update(
-    fieldOrUpdateData: string | ExternalFieldPath | firestore.UpdateData,
+    fieldOrUpdateData: string | PublicFieldPath | PublicUpdateData,
     value?: unknown,
     ...moreFieldsAndValues: unknown[]
   ): Promise<void> {
-    let parsed;
-
-    if (
-      typeof fieldOrUpdateData === 'string' ||
-      fieldOrUpdateData instanceof ExternalFieldPath
-    ) {
-      validateAtLeastNumberOfArgs('DocumentReference.update', arguments, 2);
-      parsed = parseUpdateVarargs(
-        this.firestore._dataReader,
-        'DocumentReference.update',
-        this._key,
-        fieldOrUpdateData,
-        value,
-        moreFieldsAndValues
-      );
-    } else {
-      validateExactNumberOfArgs('DocumentReference.update', arguments, 1);
-      parsed = parseUpdateData(
-        this.firestore._dataReader,
-        'DocumentReference.update',
-        this._key,
-        fieldOrUpdateData
-      );
+    try {
+      if (arguments.length === 1) {
+        return updateDoc(this._delegate, fieldOrUpdateData as PublicUpdateData);
+      } else {
+        return updateDoc(
+          this._delegate,
+          fieldOrUpdateData as string | ExpFieldPath,
+          value,
+          ...moreFieldsAndValues
+        );
+      }
+    } catch (e) {
+      throw replaceFunctionName(e, 'updateDoc', 'DocumentReference.update');
     }
-
-    return this._firestoreClient.write(
-      parsed.toMutations(this._key, Precondition.exists(true))
-    );
   }
 
   delete(): Promise<void> {
-    validateExactNumberOfArgs('DocumentReference.delete', arguments, 0);
-    return this._firestoreClient.write([
-      new DeleteMutation(this._key, Precondition.none())
-    ]);
+    return deleteDoc(this._delegate);
   }
 
+  onSnapshot(observer: PartialObserver<PublicDocumentSnapshot<T>>): Unsubscribe;
   onSnapshot(
-    observer: PartialObserver<firestore.DocumentSnapshot<T>>
+    options: PublicSnapshotListenOptions,
+    observer: PartialObserver<PublicDocumentSnapshot<T>>
   ): Unsubscribe;
   onSnapshot(
-    options: firestore.SnapshotListenOptions,
-    observer: PartialObserver<firestore.DocumentSnapshot<T>>
-  ): Unsubscribe;
-  onSnapshot(
-    onNext: NextFn<firestore.DocumentSnapshot<T>>,
+    onNext: NextFn<PublicDocumentSnapshot<T>>,
     onError?: ErrorFn,
     onCompletion?: CompleteFn
   ): Unsubscribe;
   onSnapshot(
-    options: firestore.SnapshotListenOptions,
-    onNext: NextFn<firestore.DocumentSnapshot<T>>,
+    options: PublicSnapshotListenOptions,
+    onNext: NextFn<PublicDocumentSnapshot<T>>,
     onError?: ErrorFn,
     onCompletion?: CompleteFn
   ): Unsubscribe;
 
   onSnapshot(...args: unknown[]): Unsubscribe {
-    validateBetweenNumberOfArgs(
-      'DocumentReference.onSnapshot',
-      arguments,
-      1,
-      4
+    const options = extractSnapshotOptions(args);
+    const observer = wrapObserver<DocumentSnapshot<T>, ExpDocumentSnapshot<T>>(
+      args,
+      result =>
+        new DocumentSnapshot(
+          this.firestore,
+          new ExpDocumentSnapshot(
+            this.firestore._delegate,
+            this._userDataWriter,
+            result._key,
+            result._document,
+            result.metadata,
+            this._delegate._converter
+          )
+        )
     );
-    let options: ListenOptions = {
-      includeMetadataChanges: false
-    };
-    let currArg = 0;
-    if (
-      typeof args[currArg] === 'object' &&
-      !isPartialObserver(args[currArg])
-    ) {
-      options = args[currArg] as firestore.SnapshotListenOptions;
-      validateOptionNames('DocumentReference.onSnapshot', options, [
-        'includeMetadataChanges'
-      ]);
-      validateNamedOptionalType(
-        'DocumentReference.onSnapshot',
-        'boolean',
-        'includeMetadataChanges',
-        options.includeMetadataChanges
-      );
-      currArg++;
-    }
-
-    const internalOptions = {
-      includeMetadataChanges: options.includeMetadataChanges
-    };
-
-    if (isPartialObserver(args[currArg])) {
-      const userObserver = args[currArg] as PartialObserver<
-        firestore.DocumentSnapshot<T>
-      >;
-      args[currArg] = userObserver.next?.bind(userObserver);
-      args[currArg + 1] = userObserver.error?.bind(userObserver);
-      args[currArg + 2] = userObserver.complete?.bind(userObserver);
-    } else {
-      validateArgType(
-        'DocumentReference.onSnapshot',
-        'function',
-        currArg,
-        args[currArg]
-      );
-      validateOptionalArgType(
-        'DocumentReference.onSnapshot',
-        'function',
-        currArg + 1,
-        args[currArg + 1]
-      );
-      validateOptionalArgType(
-        'DocumentReference.onSnapshot',
-        'function',
-        currArg + 2,
-        args[currArg + 2]
-      );
-    }
-
-    const observer: PartialObserver<ViewSnapshot> = {
-      next: snapshot => {
-        if (args[currArg]) {
-          (args[currArg] as NextFn<firestore.DocumentSnapshot<T>>)(
-            this._convertToDocSnapshot(snapshot)
-          );
-        }
-      },
-      error: args[currArg + 1] as ErrorFn,
-      complete: args[currArg + 2] as CompleteFn
-    };
-
-    return this._firestoreClient.listen(
-      newQueryForPath(this._key.path),
-      internalOptions,
-      observer
-    );
+    return onSnapshot(this._delegate, options, observer);
   }
 
-  get(options?: firestore.GetOptions): Promise<firestore.DocumentSnapshot<T>> {
-    validateBetweenNumberOfArgs('DocumentReference.get', arguments, 0, 1);
-    validateGetOptions('DocumentReference.get', options);
-
-    const firestoreClient = this.firestore.ensureClientConfigured();
-    if (options && options.source === 'cache') {
-      return firestoreClient
-        .getDocumentFromLocalCache(this._key)
-        .then(
-          doc =>
-            new DocumentSnapshot(
-              this.firestore,
-              this._key,
-              doc,
-              /*fromCache=*/ true,
-              doc instanceof Document ? doc.hasLocalMutations : false,
-              this._converter
-            )
-        );
+  get(options?: PublicGetOptions): Promise<PublicDocumentSnapshot<T>> {
+    let snap: Promise<ExpDocumentSnapshot<T>>;
+    if (options?.source === 'cache') {
+      snap = getDocFromCache(this._delegate);
+    } else if (options?.source === 'server') {
+      snap = getDocFromServer(this._delegate);
     } else {
-      return firestoreClient
-        .getDocumentViaSnapshotListener(this._key, options)
-        .then(snapshot => this._convertToDocSnapshot(snapshot));
+      snap = getDoc(this._delegate);
     }
+
+    return snap.then(
+      result =>
+        new DocumentSnapshot(
+          this.firestore,
+          new ExpDocumentSnapshot(
+            this.firestore._delegate,
+            this._userDataWriter,
+            result._key,
+            result._document,
+            result.metadata,
+            this._delegate._converter as UntypedFirestoreDataConverter<T>
+          )
+        )
+    );
   }
 
   withConverter<U>(
-    converter: firestore.FirestoreDataConverter<U>
-  ): firestore.DocumentReference<U> {
-    return new DocumentReference<U>(this._key, this.firestore, converter);
-  }
-
-  /**
-   * Converts a ViewSnapshot that contains the current document to a
-   * DocumentSnapshot.
-   */
-  private _convertToDocSnapshot(snapshot: ViewSnapshot): DocumentSnapshot<T> {
-    debugAssert(
-      snapshot.docs.size <= 1,
-      'Too many documents returned on a document query'
-    );
-    const doc = snapshot.docs.get(this._key);
-
-    return new DocumentSnapshot(
+    converter: PublicFirestoreDataConverter<U>
+  ): PublicDocumentReference<U> {
+    return new DocumentReference<U>(
       this.firestore,
-      this._key,
-      doc,
-      snapshot.fromCache,
-      snapshot.hasPendingWrites,
-      this._converter
+      this._delegate.withConverter(
+        converter as UntypedFirestoreDataConverter<U>
+      )
     );
   }
 }
 
-export class SnapshotMetadata implements firestore.SnapshotMetadata {
-  constructor(
-    readonly hasPendingWrites: boolean,
-    readonly fromCache: boolean
-  ) {}
+/**
+ * Replaces the function name in an error thrown by the firestore-exp API
+ * with the function names used in the classic API.
+ */
+function replaceFunctionName(
+  e: Error,
+  originalFunctionName: string,
+  updatedFunctionName: string
+): Error {
+  e.message = e.message.replace(
+    `${originalFunctionName}()`,
+    `${updatedFunctionName}()`
+  );
+  return e;
+}
 
-  isEqual(other: firestore.SnapshotMetadata): boolean {
+/**
+ * Iterates the list of arguments from an `onSnapshot` call and returns the
+ * first argument that may be an `SnapshotListenOptions` object. Returns an
+ * empty object if none is found.
+ */
+export function extractSnapshotOptions(
+  args: unknown[]
+): PublicSnapshotListenOptions {
+  for (const arg of args) {
+    if (typeof arg === 'object' && !isPartialObserver(arg)) {
+      return arg as PublicSnapshotListenOptions;
+    }
+  }
+  return {};
+}
+
+/**
+ * Creates an observer that can be passed to the firestore-exp SDK. The
+ * observer converts all observed values into the format expected by the classic
+ * SDK.
+ *
+ * @param args The list of arguments from an `onSnapshot` call.
+ * @param wrapper The function that converts the firestore-exp type into the
+ * type used by this shim.
+ */
+export function wrapObserver<CompatType, ExpType>(
+  args: unknown[],
+  wrapper: (val: ExpType) => CompatType
+): PartialObserver<ExpType> {
+  let userObserver: PartialObserver<CompatType>;
+  if (isPartialObserver(args[0])) {
+    userObserver = args[0] as PartialObserver<CompatType>;
+  } else if (isPartialObserver(args[1])) {
+    userObserver = args[1];
+  } else if (typeof args[0] === 'function') {
+    userObserver = {
+      next: args[0] as NextFn<CompatType> | undefined,
+      error: args[1] as ErrorFn | undefined,
+      complete: args[2] as CompleteFn | undefined
+    };
+  } else {
+    userObserver = {
+      next: args[1] as NextFn<CompatType> | undefined,
+      error: args[2] as ErrorFn | undefined,
+      complete: args[3] as CompleteFn | undefined
+    };
+  }
+
+  return {
+    next: val => {
+      if (userObserver!.next) {
+        userObserver!.next(wrapper(val));
+      }
+    },
+    error: userObserver.error?.bind(userObserver),
+    complete: userObserver.complete?.bind(userObserver)
+  };
+}
+
+/**
+ * Metadata about a snapshot, describing the state of the snapshot.
+ */
+export class SnapshotMetadata implements PublicSnapshotMetadata {
+  /**
+   * True if the snapshot contains the result of local writes (for example
+   * `set()` or `update()` calls) that have not yet been committed to the
+   * backend. If your listener has opted into metadata updates (via
+   * `SnapshotListenOptions`) you will receive another snapshot with
+   * `hasPendingWrites` equal to false once the writes have been committed to
+   * the backend.
+   */
+  readonly hasPendingWrites: boolean;
+
+  /**
+   * True if the snapshot was created from cached data rather than guaranteed
+   * up-to-date server data. If your listener has opted into metadata updates
+   * (via `SnapshotListenOptions`) you will receive another snapshot with
+   * `fromCache` set to false once the client has received up-to-date data from
+   * the backend.
+   */
+  readonly fromCache: boolean;
+
+  constructor(hasPendingWrites: boolean, fromCache: boolean) {
+    this.hasPendingWrites = hasPendingWrites;
+    this.fromCache = fromCache;
+  }
+
+  /**
+   * Returns true if this `SnapshotMetadata` is equal to the provided one.
+   *
+   * @param other The `SnapshotMetadata` to compare against.
+   * @return true if this `SnapshotMetadata` is equal to the provided one.
+   */
+  isEqual(other: PublicSnapshotMetadata): boolean {
     return (
       this.hasPendingWrites === other.hasPendingWrites &&
       this.fromCache === other.fromCache
@@ -1301,116 +1080,57 @@ export class SnapshotMetadata implements firestore.SnapshotMetadata {
  * Options interface that can be provided to configure the deserialization of
  * DocumentSnapshots.
  */
-export interface SnapshotOptions extends firestore.SnapshotOptions {}
+export interface SnapshotOptions extends PublicSnapshotOptions {}
 
-export class DocumentSnapshot<T = firestore.DocumentData>
-  implements firestore.DocumentSnapshot<T> {
+export class DocumentSnapshot<T = PublicDocumentData>
+  extends Compat<ExpDocumentSnapshot<T>>
+  implements PublicDocumentSnapshot<T> {
   constructor(
-    private _firestore: Firestore,
-    private _key: DocumentKey,
-    public _document: Document | null,
-    private _fromCache: boolean,
-    private _hasPendingWrites: boolean,
-    private readonly _converter: firestore.FirestoreDataConverter<T> | null
-  ) {}
-
-  data(options?: firestore.SnapshotOptions): T | undefined {
-    validateBetweenNumberOfArgs('DocumentSnapshot.data', arguments, 0, 1);
-    options = validateSnapshotOptions('DocumentSnapshot.data', options);
-    if (!this._document) {
-      return undefined;
-    } else {
-      // We only want to use the converter and create a new DocumentSnapshot
-      // if a converter has been provided.
-      if (this._converter) {
-        const snapshot = new QueryDocumentSnapshot(
-          this._firestore,
-          this._key,
-          this._document,
-          this._fromCache,
-          this._hasPendingWrites,
-          /* converter= */ null
-        );
-        return this._converter.fromFirestore(snapshot, options);
-      } else {
-        const userDataWriter = new UserDataWriter(
-          this._firestore._databaseId,
-          this._firestore._areTimestampsInSnapshotsEnabled(),
-          options.serverTimestamps || 'none',
-          key =>
-            new DocumentReference(key, this._firestore, /* converter= */ null)
-        );
-        return userDataWriter.convertValue(this._document.toProto()) as T;
-      }
-    }
+    private readonly _firestore: Firestore,
+    delegate: ExpDocumentSnapshot<T>
+  ) {
+    super(delegate);
   }
 
-  get(
-    fieldPath: string | ExternalFieldPath,
-    options?: firestore.SnapshotOptions
-  ): unknown {
-    validateBetweenNumberOfArgs('DocumentSnapshot.get', arguments, 1, 2);
-    options = validateSnapshotOptions('DocumentSnapshot.get', options);
-    if (this._document) {
-      const value = this._document
-        .data()
-        .field(
-          fieldPathFromArgument('DocumentSnapshot.get', fieldPath, this._key)
-        );
-      if (value !== null) {
-        const userDataWriter = new UserDataWriter(
-          this._firestore._databaseId,
-          this._firestore._areTimestampsInSnapshotsEnabled(),
-          options.serverTimestamps || 'none',
-          key => new DocumentReference(key, this._firestore, this._converter)
-        );
-        return userDataWriter.convertValue(value);
-      }
-    }
-    return undefined;
+  get ref(): DocumentReference<T> {
+    return new DocumentReference<T>(this._firestore, this._delegate.ref);
   }
 
   get id(): string {
-    return this._key.path.lastSegment();
+    return this._delegate.id;
   }
 
-  get ref(): firestore.DocumentReference<T> {
-    return new DocumentReference<T>(
-      this._key,
-      this._firestore,
-      this._converter
-    );
+  get metadata(): SnapshotMetadata {
+    return this._delegate.metadata;
   }
 
   get exists(): boolean {
-    return this._document !== null;
+    return this._delegate.exists();
   }
 
-  get metadata(): firestore.SnapshotMetadata {
-    return new SnapshotMetadata(this._hasPendingWrites, this._fromCache);
+  data(options?: PublicSnapshotOptions): T | undefined {
+    return this._delegate.data(options);
   }
 
-  isEqual(other: firestore.DocumentSnapshot<T>): boolean {
-    if (!(other instanceof DocumentSnapshot)) {
-      throw invalidClassError('isEqual', 'DocumentSnapshot', 1, other);
-    }
-    return (
-      this._firestore === other._firestore &&
-      this._fromCache === other._fromCache &&
-      this._key.isEqual(other._key) &&
-      (this._document === null
-        ? other._document === null
-        : this._document.isEqual(other._document)) &&
-      this._converter === other._converter
-    );
+  get(
+    fieldPath: string | PublicFieldPath,
+    options?: PublicSnapshotOptions
+    // We are using `any` here to avoid an explicit cast by our users.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): any {
+    return this._delegate.get(fieldPath as string | ExpFieldPath, options);
+  }
+
+  isEqual(other: DocumentSnapshot<T>): boolean {
+    return snapshotEqual(this._delegate, other._delegate);
   }
 }
 
-export class QueryDocumentSnapshot<T = firestore.DocumentData>
+export class QueryDocumentSnapshot<T = PublicDocumentData>
   extends DocumentSnapshot<T>
-  implements firestore.QueryDocumentSnapshot<T> {
-  data(options?: SnapshotOptions): T {
-    const data = super.data(options);
+  implements PublicQueryDocumentSnapshot<T> {
+  data(options?: PublicSnapshotOptions): T {
+    const data = this._delegate.data(options);
     debugAssert(
       data !== undefined,
       'Document in a QueryDocumentSnapshot should exist'
@@ -1428,7 +1148,7 @@ export function newQueryFilter(
   op: Operator,
   value: unknown
 ): FieldFilter {
-  let fieldValue: api.Value;
+  let fieldValue: ProtoValue;
   if (fieldPath.isKeyField()) {
     if (op === Operator.ARRAY_CONTAINS || op === Operator.ARRAY_CONTAINS_ANY) {
       throw new FirestoreError(
@@ -1436,10 +1156,10 @@ export function newQueryFilter(
         `Invalid Query. You can't perform '${op}' ` +
           'queries on FieldPath.documentId().'
       );
-    } else if (op === Operator.IN) {
+    } else if (op === Operator.IN || op === Operator.NOT_IN) {
       validateDisjunctiveFilterElements(value, op);
-      const referenceList: api.Value[] = [];
-      for (const arrayValue of value as api.Value[]) {
+      const referenceList: ProtoValue[] = [];
+      for (const arrayValue of value as ProtoValue[]) {
         referenceList.push(parseDocumentIdValue(databaseId, query, arrayValue));
       }
       fieldValue = { arrayValue: { values: referenceList } };
@@ -1447,14 +1167,18 @@ export function newQueryFilter(
       fieldValue = parseDocumentIdValue(databaseId, query, value);
     }
   } else {
-    if (op === Operator.IN || op === Operator.ARRAY_CONTAINS_ANY) {
+    if (
+      op === Operator.IN ||
+      op === Operator.NOT_IN ||
+      op === Operator.ARRAY_CONTAINS_ANY
+    ) {
       validateDisjunctiveFilterElements(value, op);
     }
     fieldValue = parseQueryValue(
       dataReader,
       methodName,
       value,
-      op === Operator.IN
+      /* allowArrays= */ op === Operator.IN || op === Operator.NOT_IN
     );
   }
   const filter = FieldFilter.create(fieldPath, op, fieldValue);
@@ -1512,7 +1236,7 @@ export function newQueryBoundFromDocument(
     );
   }
 
-  const components: api.Value[] = [];
+  const components: ProtoValue[] = [];
 
   // Because people expect to continue/end a query at the exact document
   // provided, we need to use the implicit sort order rather than the explicit
@@ -1573,7 +1297,7 @@ export function newQueryBoundFromFields(
     );
   }
 
-  const components: api.Value[] = [];
+  const components: ProtoValue[] = [];
   for (let i = 0; i < values.length; i++) {
     const rawValue = values[i];
     const orderByComponent = orderBy[i];
@@ -1623,7 +1347,11 @@ function parseDocumentIdValue(
   databaseId: DatabaseId,
   query: InternalQuery,
   documentIdValue: unknown
-): api.Value {
+): ProtoValue {
+  if (documentIdValue instanceof Compat) {
+    documentIdValue = documentIdValue._delegate;
+  }
+
   if (typeof documentIdValue === 'string') {
     if (documentIdValue === '') {
       throw new FirestoreError(
@@ -1650,7 +1378,7 @@ function parseDocumentIdValue(
       );
     }
     return refValue(databaseId, new DocumentKey(path));
-  } else if (documentIdValue instanceof DocumentKeyReference) {
+  } else if (documentIdValue instanceof ExpDocumentReference) {
     return refValue(databaseId, documentIdValue._key);
   } else {
     throw new FirestoreError(
@@ -1663,7 +1391,7 @@ function parseDocumentIdValue(
 }
 
 /**
- * Validates that the value passed into a disjunctrive filter satisfies all
+ * Validates that the value passed into a disjunctive filter satisfies all
  * array requirements.
  */
 function validateDisjunctiveFilterElements(
@@ -1684,83 +1412,96 @@ function validateDisjunctiveFilterElements(
         'maximum of 10 elements in the value array.'
     );
   }
-  if (value.indexOf(null) >= 0) {
-    throw new FirestoreError(
-      Code.INVALID_ARGUMENT,
-      `Invalid Query. '${operator.toString()}' filters cannot contain 'null' ` +
-        'in the value array.'
-    );
-  }
-  if (value.filter(element => Number.isNaN(element)).length > 0) {
-    throw new FirestoreError(
-      Code.INVALID_ARGUMENT,
-      `Invalid Query. '${operator.toString()}' filters cannot contain 'NaN' ` +
-        'in the value array.'
-    );
+}
+
+/**
+ * Given an operator, returns the set of operators that cannot be used with it.
+ *
+ * Operators in a query must adhere to the following set of rules:
+ * 1. Only one array operator is allowed.
+ * 2. Only one disjunctive operator is allowed.
+ * 3. NOT_EQUAL cannot be used with another NOT_EQUAL operator.
+ * 4. NOT_IN cannot be used with array, disjunctive, or NOT_EQUAL operators.
+ *
+ * Array operators: ARRAY_CONTAINS, ARRAY_CONTAINS_ANY
+ * Disjunctive operators: IN, ARRAY_CONTAINS_ANY, NOT_IN
+ */
+function conflictingOps(op: Operator): Operator[] {
+  switch (op) {
+    case Operator.NOT_EQUAL:
+      return [Operator.NOT_EQUAL, Operator.NOT_IN];
+    case Operator.ARRAY_CONTAINS:
+      return [
+        Operator.ARRAY_CONTAINS,
+        Operator.ARRAY_CONTAINS_ANY,
+        Operator.NOT_IN
+      ];
+    case Operator.IN:
+      return [Operator.ARRAY_CONTAINS_ANY, Operator.IN, Operator.NOT_IN];
+    case Operator.ARRAY_CONTAINS_ANY:
+      return [
+        Operator.ARRAY_CONTAINS,
+        Operator.ARRAY_CONTAINS_ANY,
+        Operator.IN,
+        Operator.NOT_IN
+      ];
+    case Operator.NOT_IN:
+      return [
+        Operator.ARRAY_CONTAINS,
+        Operator.ARRAY_CONTAINS_ANY,
+        Operator.IN,
+        Operator.NOT_IN,
+        Operator.NOT_EQUAL
+      ];
+    default:
+      return [];
   }
 }
 
 function validateNewFilter(query: InternalQuery, filter: Filter): void {
-  if (filter instanceof FieldFilter) {
-    const arrayOps = [Operator.ARRAY_CONTAINS, Operator.ARRAY_CONTAINS_ANY];
-    const disjunctiveOps = [Operator.IN, Operator.ARRAY_CONTAINS_ANY];
-    const isArrayOp = arrayOps.indexOf(filter.op) >= 0;
-    const isDisjunctiveOp = disjunctiveOps.indexOf(filter.op) >= 0;
+  debugAssert(filter instanceof FieldFilter, 'Only FieldFilters are supported');
 
-    if (filter.isInequality()) {
-      const existingField = query.getInequalityFilterField();
-      if (existingField !== null && !existingField.isEqual(filter.field)) {
-        throw new FirestoreError(
-          Code.INVALID_ARGUMENT,
-          'Invalid query. All where filters with an inequality' +
-            ' (<, <=, >, or >=) must be on the same field. But you have' +
-            ` inequality filters on '${existingField.toString()}'` +
-            ` and '${filter.field.toString()}'`
-        );
-      }
+  if (filter.isInequality()) {
+    const existingField = getInequalityFilterField(query);
+    if (existingField !== null && !existingField.isEqual(filter.field)) {
+      throw new FirestoreError(
+        Code.INVALID_ARGUMENT,
+        'Invalid query. All where filters with an inequality' +
+          ' (<, <=, >, or >=) must be on the same field. But you have' +
+          ` inequality filters on '${existingField.toString()}'` +
+          ` and '${filter.field.toString()}'`
+      );
+    }
 
-      const firstOrderByField = query.getFirstOrderByField();
-      if (firstOrderByField !== null) {
-        validateOrderByAndInequalityMatch(
-          query,
-          filter.field,
-          firstOrderByField
-        );
-      }
-    } else if (isDisjunctiveOp || isArrayOp) {
-      // You can have at most 1 disjunctive filter and 1 array filter. Check if
-      // the new filter conflicts with an existing one.
-      let conflictingOp: Operator | null = null;
-      if (isDisjunctiveOp) {
-        conflictingOp = query.findFilterOperator(disjunctiveOps);
-      }
-      if (conflictingOp === null && isArrayOp) {
-        conflictingOp = query.findFilterOperator(arrayOps);
-      }
-      if (conflictingOp !== null) {
-        // We special case when it's a duplicate op to give a slightly clearer error message.
-        if (conflictingOp === filter.op) {
-          throw new FirestoreError(
-            Code.INVALID_ARGUMENT,
-            'Invalid query. You cannot use more than one ' +
-              `'${filter.op.toString()}' filter.`
-          );
-        } else {
-          throw new FirestoreError(
-            Code.INVALID_ARGUMENT,
-            `Invalid query. You cannot use '${filter.op.toString()}' filters ` +
-              `with '${conflictingOp.toString()}' filters.`
-          );
-        }
-      }
+    const firstOrderByField = getFirstOrderByField(query);
+    if (firstOrderByField !== null) {
+      validateOrderByAndInequalityMatch(query, filter.field, firstOrderByField);
+    }
+  }
+
+  const conflictingOp = findFilterOperator(query, conflictingOps(filter.op));
+  if (conflictingOp !== null) {
+    // Special case when it's a duplicate op to give a slightly clearer error message.
+    if (conflictingOp === filter.op) {
+      throw new FirestoreError(
+        Code.INVALID_ARGUMENT,
+        'Invalid query. You cannot use more than one ' +
+          `'${filter.op.toString()}' filter.`
+      );
+    } else {
+      throw new FirestoreError(
+        Code.INVALID_ARGUMENT,
+        `Invalid query. You cannot use '${filter.op.toString()}' filters ` +
+          `with '${conflictingOp.toString()}' filters.`
+      );
     }
   }
 }
 
 function validateNewOrderBy(query: InternalQuery, orderBy: OrderBy): void {
-  if (query.getFirstOrderByField() === null) {
+  if (getFirstOrderByField(query) === null) {
     // This is the first order by. It must match any inequality.
-    const inequalityField = query.getInequalityFilterField();
+    const inequalityField = getInequalityFilterField(query);
     if (inequalityField !== null) {
       validateOrderByAndInequalityMatch(query, inequalityField, orderBy.field);
     }
@@ -1787,7 +1528,7 @@ function validateOrderByAndInequalityMatch(
 export function validateHasExplicitOrderByForLimitToLast(
   query: InternalQuery
 ): void {
-  if (query.hasLimitToLast() && query.explicitOrderBy.length === 0) {
+  if (hasLimitToLast(query) && query.explicitOrderBy.length === 0) {
     throw new FirestoreError(
       Code.UNIMPLEMENTED,
       'limitToLast() queries require specifying at least one orderBy() clause'
@@ -1795,41 +1536,30 @@ export function validateHasExplicitOrderByForLimitToLast(
   }
 }
 
-export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
+export class Query<T = PublicDocumentData> implements PublicQuery<T> {
+  private _dataReader: UserDataReader;
+
   constructor(
     public _query: InternalQuery,
     readonly firestore: Firestore,
-    protected readonly _converter: firestore.FirestoreDataConverter<T> | null
-  ) {}
+    protected readonly _converter: PublicFirestoreDataConverter<T> | null
+  ) {
+    this._dataReader = newUserDataReader(firestore._delegate);
+  }
 
   where(
-    field: string | ExternalFieldPath,
-    opStr: firestore.WhereFilterOp,
+    field: string | PublicFieldPath,
+    opStr: PublicWhereFilterOp,
     value: unknown
-  ): firestore.Query<T> {
-    validateExactNumberOfArgs('Query.where', arguments, 3);
-    validateDefined('Query.where', 3, value);
-
-    // Enumerated from the WhereFilterOp type in index.d.ts.
-    const whereFilterOpEnums = [
-      Operator.LESS_THAN,
-      Operator.LESS_THAN_OR_EQUAL,
-      Operator.EQUAL,
-      Operator.GREATER_THAN_OR_EQUAL,
-      Operator.GREATER_THAN,
-      Operator.ARRAY_CONTAINS,
-      Operator.IN,
-      Operator.ARRAY_CONTAINS_ANY
-    ];
-    const op = validateStringEnum('Query.where', whereFilterOpEnums, 2, opStr);
+  ): PublicQuery<T> {
     const fieldPath = fieldPathFromArgument('Query.where', field);
     const filter = newQueryFilter(
       this._query,
       'Query.where',
-      this.firestore._dataReader,
+      this._dataReader,
       this.firestore._databaseId,
       fieldPath,
-      op,
+      opStr as Operator,
       value
     );
     return new Query(
@@ -1840,16 +1570,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 
   orderBy(
-    field: string | ExternalFieldPath,
-    directionStr?: firestore.OrderByDirection
-  ): firestore.Query<T> {
-    validateBetweenNumberOfArgs('Query.orderBy', arguments, 1, 2);
-    validateOptionalArgType(
-      'Query.orderBy',
-      'non-empty string',
-      2,
-      directionStr
-    );
+    field: string | PublicFieldPath,
+    directionStr?: PublicOrderByDirection
+  ): PublicQuery<T> {
     let direction: Direction;
     if (directionStr === undefined || directionStr === 'asc') {
       direction = Direction.ASCENDING;
@@ -1871,10 +1594,8 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     );
   }
 
-  limit(n: number): firestore.Query<T> {
-    validateExactNumberOfArgs('Query.limit', arguments, 1);
-    validateArgType('Query.limit', 'number', 1, n);
-    validatePositiveNumber('Query.limit', 1, n);
+  limit(n: number): PublicQuery<T> {
+    validatePositiveNumber('Query.limit', n);
     return new Query(
       queryWithLimit(this._query, n, LimitType.First),
       this.firestore,
@@ -1882,10 +1603,8 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     );
   }
 
-  limitToLast(n: number): firestore.Query<T> {
-    validateExactNumberOfArgs('Query.limitToLast', arguments, 1);
-    validateArgType('Query.limitToLast', 'number', 1, n);
-    validatePositiveNumber('Query.limitToLast', 1, n);
+  limitToLast(n: number): PublicQuery<T> {
+    validatePositiveNumber('Query.limitToLast', n);
     return new Query(
       queryWithLimit(this._query, n, LimitType.Last),
       this.firestore,
@@ -1894,10 +1613,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 
   startAt(
-    docOrField: unknown | firestore.DocumentSnapshot<unknown>,
+    docOrField: unknown | PublicDocumentSnapshot<unknown>,
     ...fields: unknown[]
-  ): firestore.Query<T> {
-    validateAtLeastNumberOfArgs('Query.startAt', arguments, 1);
+  ): PublicQuery<T> {
     const bound = this.boundFromDocOrFields(
       'Query.startAt',
       docOrField,
@@ -1912,10 +1630,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 
   startAfter(
-    docOrField: unknown | firestore.DocumentSnapshot<unknown>,
+    docOrField: unknown | PublicDocumentSnapshot<unknown>,
     ...fields: unknown[]
-  ): firestore.Query<T> {
-    validateAtLeastNumberOfArgs('Query.startAfter', arguments, 1);
+  ): PublicQuery<T> {
     const bound = this.boundFromDocOrFields(
       'Query.startAfter',
       docOrField,
@@ -1930,10 +1647,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 
   endBefore(
-    docOrField: unknown | firestore.DocumentSnapshot<unknown>,
+    docOrField: unknown | PublicDocumentSnapshot<unknown>,
     ...fields: unknown[]
-  ): firestore.Query<T> {
-    validateAtLeastNumberOfArgs('Query.endBefore', arguments, 1);
+  ): PublicQuery<T> {
     const bound = this.boundFromDocOrFields(
       'Query.endBefore',
       docOrField,
@@ -1948,10 +1664,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 
   endAt(
-    docOrField: unknown | firestore.DocumentSnapshot<unknown>,
+    docOrField: unknown | PublicDocumentSnapshot<unknown>,
     ...fields: unknown[]
-  ): firestore.Query<T> {
-    validateAtLeastNumberOfArgs('Query.endAt', arguments, 1);
+  ): PublicQuery<T> {
     const bound = this.boundFromDocOrFields(
       'Query.endAt',
       docOrField,
@@ -1965,9 +1680,9 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     );
   }
 
-  isEqual(other: firestore.Query<T>): boolean {
+  isEqual(other: PublicQuery<T>): boolean {
     if (!(other instanceof Query)) {
-      throw invalidClassError('isEqual', 'Query', 1, other);
+      return false;
     }
     return (
       this.firestore === other.firestore &&
@@ -1976,27 +1691,23 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     );
   }
 
-  withConverter<U>(
-    converter: firestore.FirestoreDataConverter<U>
-  ): firestore.Query<U> {
+  withConverter<U>(converter: PublicFirestoreDataConverter<U>): PublicQuery<U> {
     return new Query<U>(this._query, this.firestore, converter);
   }
 
   /** Helper function to create a bound from a document or fields */
   private boundFromDocOrFields(
     methodName: string,
-    docOrField: unknown | firestore.DocumentSnapshot<T>,
+    docOrField: unknown | PublicDocumentSnapshot<T>,
     fields: unknown[],
     before: boolean
   ): Bound {
-    validateDefined(methodName, 1, docOrField);
     if (docOrField instanceof DocumentSnapshot) {
-      validateExactNumberOfArgs(methodName, [docOrField, ...fields], 1);
       return newQueryBoundFromDocument(
         this._query,
         this.firestore._databaseId,
         methodName,
-        docOrField._document,
+        docOrField._delegate._document,
         before
       );
     } else {
@@ -2004,7 +1715,7 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
       return newQueryBoundFromFields(
         this._query,
         this.firestore._databaseId,
-        this.firestore._dataReader,
+        this._dataReader,
         methodName,
         allFields,
         before
@@ -2012,73 +1723,48 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     }
   }
 
+  onSnapshot(observer: PartialObserver<PublicQuerySnapshot<T>>): Unsubscribe;
   onSnapshot(
-    observer: PartialObserver<firestore.QuerySnapshot<T>>
+    options: PublicSnapshotListenOptions,
+    observer: PartialObserver<PublicQuerySnapshot<T>>
   ): Unsubscribe;
   onSnapshot(
-    options: firestore.SnapshotListenOptions,
-    observer: PartialObserver<firestore.QuerySnapshot<T>>
-  ): Unsubscribe;
-  onSnapshot(
-    onNext: NextFn<firestore.QuerySnapshot<T>>,
+    onNext: NextFn<PublicQuerySnapshot<T>>,
     onError?: ErrorFn,
     onCompletion?: CompleteFn
   ): Unsubscribe;
   onSnapshot(
-    options: firestore.SnapshotListenOptions,
-    onNext: NextFn<firestore.QuerySnapshot<T>>,
+    options: PublicSnapshotListenOptions,
+    onNext: NextFn<PublicQuerySnapshot<T>>,
     onError?: ErrorFn,
     onCompletion?: CompleteFn
   ): Unsubscribe;
 
   onSnapshot(...args: unknown[]): Unsubscribe {
-    validateBetweenNumberOfArgs('Query.onSnapshot', arguments, 1, 4);
     let options: ListenOptions = {};
     let currArg = 0;
     if (
       typeof args[currArg] === 'object' &&
       !isPartialObserver(args[currArg])
     ) {
-      options = args[currArg] as firestore.SnapshotListenOptions;
-      validateOptionNames('Query.onSnapshot', options, [
-        'includeMetadataChanges'
-      ]);
-      validateNamedOptionalType(
-        'Query.onSnapshot',
-        'boolean',
-        'includeMetadataChanges',
-        options.includeMetadataChanges
-      );
+      options = args[currArg] as PublicSnapshotListenOptions;
       currArg++;
     }
 
     if (isPartialObserver(args[currArg])) {
       const userObserver = args[currArg] as PartialObserver<
-        firestore.QuerySnapshot<T>
+        PublicQuerySnapshot<T>
       >;
       args[currArg] = userObserver.next?.bind(userObserver);
       args[currArg + 1] = userObserver.error?.bind(userObserver);
       args[currArg + 2] = userObserver.complete?.bind(userObserver);
     } else {
-      validateArgType('Query.onSnapshot', 'function', currArg, args[currArg]);
-      validateOptionalArgType(
-        'Query.onSnapshot',
-        'function',
-        currArg + 1,
-        args[currArg + 1]
-      );
-      validateOptionalArgType(
-        'Query.onSnapshot',
-        'function',
-        currArg + 2,
-        args[currArg + 2]
-      );
     }
 
     const observer: PartialObserver<ViewSnapshot> = {
       next: snapshot => {
         if (args[currArg]) {
-          (args[currArg] as NextFn<firestore.QuerySnapshot<T>>)(
+          (args[currArg] as NextFn<PublicQuerySnapshot<T>>)(
             new QuerySnapshot(
               this.firestore,
               this._query,
@@ -2093,19 +1779,21 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
     };
 
     validateHasExplicitOrderByForLimitToLast(this._query);
-    const firestoreClient = this.firestore.ensureClientConfigured();
-    return firestoreClient.listen(this._query, options, observer);
+    const client = ensureFirestoreConfigured(this.firestore._delegate);
+    return firestoreClientListen(client, this._query, options, observer);
   }
 
-  get(options?: firestore.GetOptions): Promise<firestore.QuerySnapshot<T>> {
-    validateBetweenNumberOfArgs('Query.get', arguments, 0, 1);
-    validateGetOptions('Query.get', options);
+  get(options?: PublicGetOptions): Promise<PublicQuerySnapshot<T>> {
     validateHasExplicitOrderByForLimitToLast(this._query);
 
-    const firestoreClient = this.firestore.ensureClientConfigured();
+    const client = ensureFirestoreConfigured(this.firestore._delegate);
     return (options && options.source === 'cache'
-      ? firestoreClient.getDocumentsFromLocalCache(this._query)
-      : firestoreClient.getDocumentsViaSnapshotListener(this._query, options)
+      ? firestoreClientGetDocumentsFromLocalCache(client, this._query)
+      : firestoreClientGetDocumentsViaSnapshotListener(
+          client,
+          this._query,
+          options
+        )
     ).then(
       snap =>
         new QuerySnapshot(this.firestore, this._query, snap, this._converter)
@@ -2113,27 +1801,29 @@ export class Query<T = firestore.DocumentData> implements firestore.Query<T> {
   }
 }
 
-export class QuerySnapshot<T = firestore.DocumentData>
-  implements firestore.QuerySnapshot<T> {
-  private _cachedChanges: Array<firestore.DocumentChange<T>> | null = null;
+export class QuerySnapshot<T = PublicDocumentData>
+  implements PublicQuerySnapshot<T> {
+  private _cachedChanges: Array<PublicDocumentChange<T>> | null = null;
   private _cachedChangesIncludeMetadataChanges: boolean | null = null;
+  private _userDataWriter: UserDataWriter;
 
-  readonly metadata: firestore.SnapshotMetadata;
+  readonly metadata: PublicSnapshotMetadata;
 
   constructor(
     private readonly _firestore: Firestore,
     private readonly _originalQuery: InternalQuery,
     private readonly _snapshot: ViewSnapshot,
-    private readonly _converter: firestore.FirestoreDataConverter<T> | null
+    private readonly _converter: PublicFirestoreDataConverter<T> | null
   ) {
+    this._userDataWriter = new UserDataWriter(this._firestore);
     this.metadata = new SnapshotMetadata(
       _snapshot.hasPendingWrites,
       _snapshot.fromCache
     );
   }
 
-  get docs(): Array<firestore.QueryDocumentSnapshot<T>> {
-    const result: Array<firestore.QueryDocumentSnapshot<T>> = [];
+  get docs(): Array<PublicQueryDocumentSnapshot<T>> {
+    const result: Array<PublicQueryDocumentSnapshot<T>> = [];
     this.forEach(doc => result.push(doc));
     return result;
   }
@@ -2147,11 +1837,9 @@ export class QuerySnapshot<T = firestore.DocumentData>
   }
 
   forEach(
-    callback: (result: firestore.QueryDocumentSnapshot<T>) => void,
+    callback: (result: PublicQueryDocumentSnapshot<T>) => void,
     thisArg?: unknown
   ): void {
-    validateBetweenNumberOfArgs('QuerySnapshot.forEach', arguments, 1, 2);
-    validateArgType('QuerySnapshot.forEach', 'function', 1, callback);
     this._snapshot.docs.forEach(doc => {
       callback.call(
         thisArg,
@@ -2164,23 +1852,14 @@ export class QuerySnapshot<T = firestore.DocumentData>
     });
   }
 
-  get query(): firestore.Query<T> {
+  get query(): PublicQuery<T> {
     return new Query(this._originalQuery, this._firestore, this._converter);
   }
 
   docChanges(
-    options?: firestore.SnapshotListenOptions
-  ): Array<firestore.DocumentChange<T>> {
+    options?: PublicSnapshotListenOptions
+  ): Array<PublicDocumentChange<T>> {
     if (options) {
-      validateOptionNames('QuerySnapshot.docChanges', options, [
-        'includeMetadataChanges'
-      ]);
-      validateNamedOptionalType(
-        'QuerySnapshot.docChanges',
-        'boolean',
-        'includeMetadataChanges',
-        options.includeMetadataChanges
-      );
     }
 
     const includeMetadataChanges = !!(
@@ -2211,9 +1890,9 @@ export class QuerySnapshot<T = firestore.DocumentData>
   }
 
   /** Check the equality. The call can be very expensive. */
-  isEqual(other: firestore.QuerySnapshot<T>): boolean {
+  isEqual(other: PublicQuerySnapshot<T>): boolean {
     if (!(other instanceof QuerySnapshot)) {
-      throw invalidClassError('isEqual', 'QuerySnapshot', 1, other);
+      return false;
     }
 
     return (
@@ -2231,21 +1910,25 @@ export class QuerySnapshot<T = firestore.DocumentData>
   ): QueryDocumentSnapshot<T> {
     return new QueryDocumentSnapshot(
       this._firestore,
-      doc.key,
-      doc,
-      fromCache,
-      hasPendingWrites,
-      this._converter
+      new ExpQueryDocumentSnapshot(
+        this._firestore._delegate,
+        this._userDataWriter,
+        doc.key,
+        doc,
+        new SnapshotMetadata(hasPendingWrites, fromCache),
+        this._converter
+      )
     );
   }
 }
 
-export class CollectionReference<T = firestore.DocumentData> extends Query<T>
-  implements firestore.CollectionReference<T> {
+export class CollectionReference<T = PublicDocumentData>
+  extends Query<T>
+  implements PublicCollectionReference<T> {
   constructor(
     readonly _path: ResourcePath,
     firestore: Firestore,
-    _converter: firestore.FirestoreDataConverter<T> | null
+    _converter: UntypedFirestoreDataConverter<T> | null
   ) {
     super(newQueryForPath(_path), firestore, _converter);
     if (_path.length % 2 !== 1) {
@@ -2262,13 +1945,13 @@ export class CollectionReference<T = firestore.DocumentData> extends Query<T>
     return this._query.path.lastSegment();
   }
 
-  get parent(): firestore.DocumentReference<firestore.DocumentData> | null {
+  get parent(): PublicDocumentReference<PublicDocumentData> | null {
     const parentPath = this._query.path.popLast();
     if (parentPath.isEmpty()) {
       return null;
     } else {
-      return new DocumentReference<firestore.DocumentData>(
-        new DocumentKey(parentPath),
+      return DocumentReference.forPath(
+        parentPath,
         this.firestore,
         /* converter= */ null
       );
@@ -2279,19 +1962,13 @@ export class CollectionReference<T = firestore.DocumentData> extends Query<T>
     return this._query.path.canonicalString();
   }
 
-  doc(pathString?: string): firestore.DocumentReference<T> {
-    validateBetweenNumberOfArgs('CollectionReference.doc', arguments, 0, 1);
+  doc(pathString?: string): PublicDocumentReference<T> {
     // We allow omission of 'pathString' but explicitly prohibit passing in both
     // 'undefined' and 'null'.
     if (arguments.length === 0) {
       pathString = AutoId.newId();
     }
-    validateArgType(
-      'CollectionReference.doc',
-      'non-empty string',
-      1,
-      pathString
-    );
+    validateNonEmptyArgument('CollectionReference.doc', 'path', pathString);
     const path = ResourcePath.fromString(pathString!);
     return DocumentReference.forPath<T>(
       this._query.path.child(path),
@@ -2300,117 +1977,57 @@ export class CollectionReference<T = firestore.DocumentData> extends Query<T>
     );
   }
 
-  add(value: T): Promise<firestore.DocumentReference<T>> {
-    validateExactNumberOfArgs('CollectionReference.add', arguments, 1);
+  add(value: T): Promise<PublicDocumentReference<T>> {
     const convertedValue = this._converter
       ? this._converter.toFirestore(value)
       : value;
-    validateArgType('CollectionReference.add', 'object', 1, convertedValue);
     const docRef = this.doc();
-    return docRef.set(value).then(() => docRef);
+
+    // Call set() with the converted value directly to avoid calling toFirestore() a second time.
+    return DocumentReference.forKey(
+      (docRef as DocumentReference<T>)._delegate._key,
+      this.firestore,
+      null
+    )
+      .set(convertedValue)
+      .then(() => docRef);
   }
 
   withConverter<U>(
-    converter: firestore.FirestoreDataConverter<U>
-  ): firestore.CollectionReference<U> {
+    converter: PublicFirestoreDataConverter<U>
+  ): PublicCollectionReference<U> {
     return new CollectionReference<U>(this._path, this.firestore, converter);
-  }
-}
-
-function validateSetOptions(
-  methodName: string,
-  options: firestore.SetOptions | undefined
-): firestore.SetOptions {
-  if (options === undefined) {
-    return {
-      merge: false
-    };
-  }
-
-  validateOptionNames(methodName, options, ['merge', 'mergeFields']);
-  validateNamedOptionalType(methodName, 'boolean', 'merge', options.merge);
-  validateOptionalArrayElements(
-    methodName,
-    'mergeFields',
-    'a string or a FieldPath',
-    options.mergeFields,
-    element =>
-      typeof element === 'string' || element instanceof ExternalFieldPath
-  );
-
-  if (options.mergeFields !== undefined && options.merge !== undefined) {
-    throw new FirestoreError(
-      Code.INVALID_ARGUMENT,
-      `Invalid options passed to function ${methodName}(): You cannot specify both "merge" ` +
-        `and "mergeFields".`
-    );
-  }
-
-  return options;
-}
-
-function validateSnapshotOptions(
-  methodName: string,
-  options: firestore.SnapshotOptions | undefined
-): firestore.SnapshotOptions {
-  if (options === undefined) {
-    return {};
-  }
-
-  validateOptionNames(methodName, options, ['serverTimestamps']);
-  validateNamedOptionalPropertyEquals(
-    methodName,
-    'options',
-    'serverTimestamps',
-    options.serverTimestamps,
-    ['estimate', 'previous', 'none']
-  );
-  return options;
-}
-
-function validateGetOptions(
-  methodName: string,
-  options: firestore.GetOptions | undefined
-): void {
-  validateOptionalArgType(methodName, 'object', 1, options);
-  if (options) {
-    validateOptionNames(methodName, options, ['source']);
-    validateNamedOptionalPropertyEquals(
-      methodName,
-      'options',
-      'source',
-      options.source,
-      ['default', 'server', 'cache']
-    );
   }
 }
 
 function validateReference<T>(
   methodName: string,
-  documentRef: firestore.DocumentReference<T>,
+  documentRef: PublicDocumentReference<T>,
   firestore: Firestore
-): DocumentKeyReference<T> {
-  if (!(documentRef instanceof DocumentKeyReference)) {
-    throw invalidClassError(methodName, 'DocumentReference', 1, documentRef);
-  } else if (documentRef.firestore !== firestore) {
+): ExpDocumentReference<T> {
+  const reference = cast<ExpDocumentReference<T>>(
+    documentRef,
+    ExpDocumentReference
+  );
+  if (reference.firestore !== firestore._delegate) {
     throw new FirestoreError(
       Code.INVALID_ARGUMENT,
       'Provided document reference is from a different Firestore instance.'
     );
   } else {
-    return documentRef;
+    return reference;
   }
 }
 
 /**
- * Calculates the array of firestore.DocumentChange's for a given ViewSnapshot.
+ * Calculates the array of DocumentChanges for a given ViewSnapshot.
  *
  * Exported for testing.
  *
  * @param snapshot The ViewSnapshot that represents the expected state.
  * @param includeMetadataChanges Whether to include metadata changes.
  * @param converter A factory function that returns a QueryDocumentSnapshot.
- * @return An objecyt that matches the firestore.DocumentChange API.
+ * @return An object that matches the DocumentChange API.
  */
 export function changesFromSnapshot<DocSnap>(
   snapshot: ViewSnapshot,
@@ -2421,7 +2038,7 @@ export function changesFromSnapshot<DocSnap>(
     hasPendingWrite: boolean
   ) => DocSnap
 ): Array<{
-  type: firestore.DocumentChangeType;
+  type: PublicDocumentChangeType;
   doc: DocSnap;
   oldIndex: number;
   newIndex: number;
@@ -2447,7 +2064,7 @@ export function changesFromSnapshot<DocSnap>(
       );
       lastDoc = change.doc;
       return {
-        type: 'added' as firestore.DocumentChangeType,
+        type: 'added' as PublicDocumentChangeType,
         doc,
         oldIndex: -1,
         newIndex: index++
@@ -2483,7 +2100,7 @@ export function changesFromSnapshot<DocSnap>(
   }
 }
 
-function resultChangeType(type: ChangeType): firestore.DocumentChangeType {
+function resultChangeType(type: ChangeType): PublicDocumentChangeType {
   switch (type) {
     case ChangeType.Added:
       return 'added';
@@ -2509,8 +2126,8 @@ function resultChangeType(type: ChangeType): firestore.DocumentChangeType {
 export function applyFirestoreDataConverter<T>(
   converter: UntypedFirestoreDataConverter<T> | null,
   value: T,
-  options?: firestore.SetOptions
-): firestore.DocumentData {
+  options?: PublicSetOptions
+): PublicDocumentData {
   let convertedValue;
   if (converter) {
     if (options && (options.merge || options.mergeFields)) {
@@ -2522,11 +2139,7 @@ export function applyFirestoreDataConverter<T>(
       convertedValue = converter.toFirestore(value);
     }
   } else {
-    convertedValue = value as firestore.DocumentData;
+    convertedValue = value as PublicDocumentData;
   }
   return convertedValue;
-}
-
-function contains(obj: object, key: string): obj is { key: unknown } {
-  return Object.prototype.hasOwnProperty.call(obj, key);
 }

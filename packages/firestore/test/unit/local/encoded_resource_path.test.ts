@@ -53,18 +53,9 @@ describe('EncodedResourcePath', () => {
 
   const dbName = 'resource-path-tests';
 
-  beforeEach(() => {
-    return SimpleDb.delete(dbName)
-      .then(() => {
-        return SimpleDb.openOrCreate(
-          dbName,
-          1,
-          new EncodedResourcePathSchemaConverter()
-        );
-      })
-      .then(simpleDb => {
-        db = simpleDb;
-      });
+  beforeEach(async () => {
+    await SimpleDb.delete(dbName);
+    db = new SimpleDb(dbName, 1, new EncodedResourcePathSchemaConverter());
   });
 
   afterEach(() => {
@@ -204,7 +195,12 @@ function runTransaction<T>(
     transaction: SimpleDbTransaction
   ) => PersistencePromise<T>
 ): Promise<T> {
-  return db.runTransaction<T>('readwrite', ['test'], txn => {
-    return fn(txn.store<string, boolean>('test'), txn);
-  });
+  return db.runTransaction<T>(
+    'EncodedResourcePathTests',
+    'readwrite',
+    ['test'],
+    txn => {
+      return fn(txn.store<string, boolean>('test'), txn);
+    }
+  );
 }

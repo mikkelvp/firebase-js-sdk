@@ -8,7 +8,7 @@
 
 |  Class | Description |
 |  --- | --- |
-|  [Blob](./firestore_lite.blob.md) |  |
+|  [Bytes](./firestore_lite.bytes.md) |  |
 |  [CollectionReference](./firestore_lite.collectionreference.md) |  |
 |  [DocumentReference](./firestore_lite.documentreference.md) |  |
 |  [DocumentSnapshot](./firestore_lite.documentsnapshot.md) |  |
@@ -31,15 +31,15 @@
 |  [addDoc(reference, data)](./firestore_lite.adddoc.md) |  |
 |  [arrayRemove(elements)](./firestore_lite.arrayremove.md) |  |
 |  [arrayUnion(elements)](./firestore_lite.arrayunion.md) |  |
-|  [collection(firestore, collectionPath)](./firestore_lite.collection.md) |  |
-|  [collection(reference, collectionPath)](./firestore_lite.collection_1.md) |  |
-|  [collection(reference, collectionPath)](./firestore_lite.collection_2.md) |  |
+|  [collection(firestore, path, pathComponents)](./firestore_lite.collection.md) |  |
+|  [collection(reference, path, pathComponents)](./firestore_lite.collection_1.md) |  |
+|  [collection(reference, path, pathComponents)](./firestore_lite.collection_2.md) |  |
 |  [collectionGroup(firestore, collectionId)](./firestore_lite.collectiongroup.md) |  |
 |  [deleteDoc(reference)](./firestore_lite.deletedoc.md) |  |
 |  [deleteField()](./firestore_lite.deletefield.md) |  |
-|  [doc(firestore, documentPath)](./firestore_lite.doc.md) |  |
-|  [doc(reference, documentPath)](./firestore_lite.doc_1.md) |  |
-|  [doc(reference, documentPath)](./firestore_lite.doc_2.md) |  |
+|  [doc(firestore, path, pathComponents)](./firestore_lite.doc.md) |  |
+|  [doc(reference, path, pathComponents)](./firestore_lite.doc_1.md) |  |
+|  [doc(reference, path, pathComponents)](./firestore_lite.doc_2.md) |  |
 |  [documentId()](./firestore_lite.documentid.md) |  |
 |  [endAt(snapshot)](./firestore_lite.endat.md) |  |
 |  [endAt(fieldValues)](./firestore_lite.endat_1.md) |  |
@@ -53,8 +53,6 @@
 |  [limit(limit)](./firestore_lite.limit.md) |  |
 |  [limitToLast(limit)](./firestore_lite.limittolast.md) |  |
 |  [orderBy(fieldPath, directionStr)](./firestore_lite.orderby.md) |  |
-|  [parent(reference)](./firestore_lite.parent.md) |  |
-|  [parent(reference)](./firestore_lite.parent_1.md) |  |
 |  [query(query, constraints)](./firestore_lite.query.md) |  |
 |  [queryEqual(left, right)](./firestore_lite.queryequal.md) |  |
 |  [refEqual(left, right)](./firestore_lite.refequal.md) |  |

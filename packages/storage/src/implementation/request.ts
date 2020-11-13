@@ -35,9 +35,6 @@ import * as UrlUtils from './url';
 import { Headers, XhrIo, ErrorCode } from './xhrio';
 import { XhrIoPool } from './xhriopool';
 
-/**
- * @template T
- */
 export interface Request<T> {
   getPromise(): Promise<T>;
 
@@ -46,15 +43,11 @@ export interface Request<T> {
    * appropriate value (if the request is finished before you call this method,
    * but the promise has not yet been resolved), so don't just assume it will be
    * rejected if you call this function.
-   * @param appDelete True if the cancelation came from the app being deleted.
+   * @param appDelete - True if the cancelation came from the app being deleted.
    */
   cancel(appDelete?: boolean): void;
 }
 
-/**
- * @struct
- * @template T
- */
 class NetworkRequest<T> implements Request<T> {
   private url_: string;
   private method_: string;
@@ -64,8 +57,9 @@ class NetworkRequest<T> implements Request<T> {
   private additionalRetryCodes_: number[];
   private pendingXhr_: XhrIo | null = null;
   private backoffId_: backoff.id | null = null;
-  private resolve_: Function | null = null;
-  private reject_: Function | null = null;
+  private resolve_!: (value?: T | PromiseLike<T> | undefined) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private reject_!: (reason?: any) => void;
   private canceled_: boolean = false;
   private appDelete_: boolean = false;
   private callback_: (p1: XhrIo, p2: string) => T;
@@ -163,15 +157,15 @@ class NetworkRequest<T> implements Request<T> {
     }
 
     /**
-     * @param requestWentThrough True if the request eventually went
+     * @param requestWentThrough - True if the request eventually went
      *     through, false if it hit the retry limit or was canceled.
      */
     function backoffDone(
       requestWentThrough: boolean,
       status: RequestEndStatus
     ): void {
-      const resolve = self.resolve_ as Function;
-      const reject = self.reject_ as Function;
+      const resolve = self.resolve_;
+      const reject = self.reject_;
       const xhr = status.xhr as XhrIo;
       if (status.wasSuccessCode) {
         try {
@@ -187,7 +181,7 @@ class NetworkRequest<T> implements Request<T> {
       } else {
         if (xhr !== null) {
           const err = unknown();
-          err.setServerResponseProp(xhr.getResponseText());
+          err.serverResponse = xhr.getResponseText();
           if (self.errorCallback_) {
             reject(self.errorCallback_(xhr, err));
           } else {
@@ -247,8 +241,7 @@ class NetworkRequest<T> implements Request<T> {
 
 /**
  * A collection of information about the result of a network request.
- * @param opt_canceled Defaults to false.
- * @struct
+ * @param opt_canceled - Defaults to false.
  */
 export class RequestEndStatus {
   /**
@@ -286,9 +279,6 @@ export function addGmpidHeader_(headers: Headers, appId: string | null): void {
   }
 }
 
-/**
- * @template T
- */
 export function makeRequest<T>(
   requestInfo: RequestInfo<T>,
   appId: string | null,

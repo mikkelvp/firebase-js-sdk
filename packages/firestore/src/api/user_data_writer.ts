@@ -15,12 +15,15 @@
  * limitations under the License.
  */
 
-import * as firestore from '@firebase/firestore-types';
+import { DocumentData } from '@firebase/firestore-types';
 
-import * as api from '../protos/firestore_proto_api';
-
-import { DocumentKeyReference } from './user_data_reader';
-import { Blob } from './blob';
+import {
+  ArrayValue as ProtoArrayValue,
+  LatLng as ProtoLatLng,
+  MapValue as ProtoMapValue,
+  Timestamp as ProtoTimestamp,
+  Value as ProtoValue
+} from '../protos/firestore_proto_api';
 import { GeoPoint } from './geo_point';
 import { Timestamp } from './timestamp';
 import { DatabaseId } from '../core/database_info';
@@ -41,6 +44,9 @@ import { TypeOrder } from '../model/object_value';
 import { ResourcePath } from '../model/path';
 import { isValidResourceName } from '../remote/serializer';
 import { logError } from '../util/log';
+import { ByteString } from '../util/byte_string';
+import { Blob } from './blob';
+import { DocumentReference, Firestore } from './database';
 
 export type ServerTimestampBehavior = 'estimate' | 'previous' | 'none';
 
@@ -48,17 +54,11 @@ export type ServerTimestampBehavior = 'estimate' | 'previous' | 'none';
  * Converts Firestore's internal types to the JavaScript types that we expose
  * to the user.
  */
-export class UserDataWriter {
-  constructor(
-    private readonly databaseId: DatabaseId,
-    private readonly timestampsInSnapshots: boolean,
-    private readonly serverTimestampBehavior: ServerTimestampBehavior,
-    private readonly referenceFactory: (
-      key: DocumentKey
-    ) => DocumentKeyReference<firestore.DocumentData>
-  ) {}
-
-  convertValue(value: api.Value): unknown {
+export abstract class AbstractUserDataWriter {
+  convertValue(
+    value: ProtoValue,
+    serverTimestampBehavior: ServerTimestampBehavior = 'none'
+  ): unknown {
     switch (typeOrder(value)) {
       case TypeOrder.NullValue:
         return null;
@@ -69,51 +69,62 @@ export class UserDataWriter {
       case TypeOrder.TimestampValue:
         return this.convertTimestamp(value.timestampValue!);
       case TypeOrder.ServerTimestampValue:
-        return this.convertServerTimestamp(value);
+        return this.convertServerTimestamp(value, serverTimestampBehavior);
       case TypeOrder.StringValue:
         return value.stringValue!;
       case TypeOrder.BlobValue:
-        return new Blob(normalizeByteString(value.bytesValue!));
+        return this.convertBytes(normalizeByteString(value.bytesValue!));
       case TypeOrder.RefValue:
         return this.convertReference(value.referenceValue!);
       case TypeOrder.GeoPointValue:
         return this.convertGeoPoint(value.geoPointValue!);
       case TypeOrder.ArrayValue:
-        return this.convertArray(value.arrayValue!);
+        return this.convertArray(value.arrayValue!, serverTimestampBehavior);
       case TypeOrder.ObjectValue:
-        return this.convertObject(value.mapValue!);
+        return this.convertObject(value.mapValue!, serverTimestampBehavior);
       default:
         throw fail('Invalid value type: ' + JSON.stringify(value));
     }
   }
 
-  private convertObject(mapValue: api.MapValue): firestore.DocumentData {
-    const result: firestore.DocumentData = {};
+  private convertObject(
+    mapValue: ProtoMapValue,
+    serverTimestampBehavior: ServerTimestampBehavior
+  ): DocumentData {
+    const result: DocumentData = {};
     forEach(mapValue.fields || {}, (key, value) => {
-      result[key] = this.convertValue(value);
+      result[key] = this.convertValue(value, serverTimestampBehavior);
     });
     return result;
   }
 
-  private convertGeoPoint(value: api.LatLng): GeoPoint {
+  private convertGeoPoint(value: ProtoLatLng): GeoPoint {
     return new GeoPoint(
       normalizeNumber(value.latitude),
       normalizeNumber(value.longitude)
     );
   }
 
-  private convertArray(arrayValue: api.ArrayValue): unknown[] {
-    return (arrayValue.values || []).map(value => this.convertValue(value));
+  private convertArray(
+    arrayValue: ProtoArrayValue,
+    serverTimestampBehavior: ServerTimestampBehavior
+  ): unknown[] {
+    return (arrayValue.values || []).map(value =>
+      this.convertValue(value, serverTimestampBehavior)
+    );
   }
 
-  private convertServerTimestamp(value: api.Value): unknown {
-    switch (this.serverTimestampBehavior) {
+  private convertServerTimestamp(
+    value: ProtoValue,
+    serverTimestampBehavior: ServerTimestampBehavior
+  ): unknown {
+    switch (serverTimestampBehavior) {
       case 'previous':
         const previousValue = getPreviousValue(value);
         if (previousValue == null) {
           return null;
         }
-        return this.convertValue(previousValue);
+        return this.convertValue(previousValue, serverTimestampBehavior);
       case 'estimate':
         return this.convertTimestamp(getLocalWriteTime(value));
       default:
@@ -121,22 +132,15 @@ export class UserDataWriter {
     }
   }
 
-  private convertTimestamp(value: api.Timestamp): Timestamp | Date {
+  private convertTimestamp(value: ProtoTimestamp): Timestamp {
     const normalizedValue = normalizeTimestamp(value);
-    const timestamp = new Timestamp(
-      normalizedValue.seconds,
-      normalizedValue.nanos
-    );
-    if (this.timestampsInSnapshots) {
-      return timestamp;
-    } else {
-      return timestamp.toDate();
-    }
+    return new Timestamp(normalizedValue.seconds, normalizedValue.nanos);
   }
 
-  private convertReference(
-    name: string
-  ): DocumentKeyReference<firestore.DocumentData> {
+  protected convertDocumentKey(
+    name: string,
+    expectedDatabaseId: DatabaseId
+  ): DocumentKey {
     const resourcePath = ResourcePath.fromString(name);
     hardAssert(
       isValidResourceName(resourcePath),
@@ -145,18 +149,36 @@ export class UserDataWriter {
     const databaseId = new DatabaseId(resourcePath.get(1), resourcePath.get(3));
     const key = new DocumentKey(resourcePath.popFirst(5));
 
-    if (!databaseId.isEqual(this.databaseId)) {
+    if (!databaseId.isEqual(expectedDatabaseId)) {
       // TODO(b/64130202): Somehow support foreign references.
       logError(
         `Document ${key} contains a document ` +
           `reference within a different database (` +
           `${databaseId.projectId}/${databaseId.database}) which is not ` +
           `supported. It will be treated as a reference in the current ` +
-          `database (${this.databaseId.projectId}/${this.databaseId.database}) ` +
+          `database (${expectedDatabaseId.projectId}/${expectedDatabaseId.database}) ` +
           `instead.`
       );
     }
+    return key;
+  }
 
-    return this.referenceFactory(key);
+  protected abstract convertReference(name: string): unknown;
+
+  protected abstract convertBytes(bytes: ByteString): unknown;
+}
+
+export class UserDataWriter extends AbstractUserDataWriter {
+  constructor(protected firestore: Firestore) {
+    super();
+  }
+
+  protected convertBytes(bytes: ByteString): Blob {
+    return new Blob(bytes);
+  }
+
+  protected convertReference(name: string): DocumentReference {
+    const key = this.convertDocumentKey(name, this.firestore._databaseId);
+    return DocumentReference.forKey(key, this.firestore, /* converter= */ null);
   }
 }

@@ -15,12 +15,14 @@
  * limitations under the License.
  */
 
-import './register';
+import { registerFirestore } from './register';
+
+registerFirestore();
 
 export { FieldPath, documentId } from '../lite/src/api/field_path';
 
 export {
-  Firestore as FirebaseFirestore,
+  FirebaseFirestore,
   initializeFirestore,
   getFirestore,
   enableIndexedDbPersistence,
@@ -29,14 +31,19 @@ export {
   waitForPendingWrites,
   disableNetwork,
   enableNetwork,
-  terminate
+  terminate,
+  Settings
 } from './src/api/database';
 
 export {
+  DocumentChange,
   DocumentSnapshot,
   QueryDocumentSnapshot,
   QuerySnapshot,
-  snapshotEqual
+  snapshotEqual,
+  SnapshotOptions,
+  FirestoreDataConverter,
+  DocumentChangeType
 } from './src/api/snapshot';
 
 export { SnapshotMetadata } from '../src/api/database';
@@ -49,7 +56,6 @@ export {
   doc,
   collection,
   collectionGroup,
-  parent,
   startAt,
   startAfter,
   endAt,
@@ -58,7 +64,12 @@ export {
   limit,
   limitToLast,
   where,
-  orderBy
+  orderBy,
+  SetOptions,
+  QueryConstraintType,
+  DocumentData,
+  UpdateData,
+  OrderByDirection
 } from '../lite/src/api/reference';
 
 export { runTransaction, Transaction } from './src/api/transaction';
@@ -87,9 +98,9 @@ export {
   serverTimestamp
 } from '../lite/src/api/field_value';
 
-export { setLogLevel } from '../src/util/log';
+export { setLogLevel, LogLevel } from '../src/util/log';
 
-export { Blob } from '../src/api/blob';
+export { Bytes } from '../lite/src/api/bytes';
 
 export { writeBatch } from './src/api/write_batch';
 
@@ -100,3 +111,9 @@ export { GeoPoint } from '../src/api/geo_point';
 export { Timestamp } from '../src/api/timestamp';
 
 export { refEqual, queryEqual } from '../lite/src/api/reference';
+
+export { SnapshotListenOptions } from './src/api/reference';
+
+export { CACHE_SIZE_UNLIMITED } from '../src/api/database';
+
+export { FirestoreErrorCode, FirestoreError } from '../src/util/error';

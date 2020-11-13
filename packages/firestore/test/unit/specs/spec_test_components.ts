@@ -115,17 +115,15 @@ function failTransactionIfNeeded(
     failActions.indexOf(actionName as PersistenceAction) !== -1;
   if (shouldFail) {
     throw new IndexedDbTransactionError(
+      'Simulated error',
       new Error('Simulated retryable error: ' + actionName)
     );
   }
 }
 
 export class MockOnlineComponentProvider extends OnlineComponentProvider {
-  connection!: MockConnection;
-
-  async loadConnection(cfg: ComponentConfiguration): Promise<Connection> {
-    this.connection = new MockConnection(cfg.asyncQueue);
-    return this.connection;
+  constructor(private readonly connection: MockConnection) {
+    super();
   }
 
   createDatastore(cfg: ComponentConfiguration): Datastore {
@@ -133,7 +131,7 @@ export class MockOnlineComponentProvider extends OnlineComponentProvider {
       cfg.databaseInfo.databaseId,
       /* useProto3Json= */ true
     );
-    return newDatastore(cfg.credentials, serializer);
+    return newDatastore(cfg.credentials, this.connection, serializer);
   }
 }
 
@@ -145,7 +143,7 @@ export class MockMultiTabOfflineComponentProvider extends MultiTabOfflineCompone
     private readonly document: FakeDocument,
     onlineComponentProvider: OnlineComponentProvider
   ) {
-    super(onlineComponentProvider);
+    super(onlineComponentProvider, /* cacheSizeBytes= */ undefined);
   }
 
   createGarbageCollectionScheduler(
@@ -169,11 +167,6 @@ export class MockMultiTabOfflineComponentProvider extends MultiTabOfflineCompone
   }
 
   createPersistence(cfg: ComponentConfiguration): MockIndexedDbPersistence {
-    debugAssert(
-      cfg.persistenceSettings.durable,
-      'Can only start durable persistence'
-    );
-
     const persistenceKey = indexedDbStoragePrefix(
       cfg.databaseInfo.databaseId,
       cfg.databaseInfo.persistenceKey
@@ -184,13 +177,13 @@ export class MockMultiTabOfflineComponentProvider extends MultiTabOfflineCompone
       /* allowTabSynchronization= */ true,
       persistenceKey,
       cfg.clientId,
-      LruParams.withCacheSize(cfg.persistenceSettings.cacheSizeBytes),
+      LruParams.DEFAULT,
       cfg.asyncQueue,
       this.window,
       this.document,
       serializer,
       this.sharedClientState,
-      cfg.persistenceSettings.forceOwningTab
+      /* forceOwningTab= */ false
     );
   }
 }
@@ -210,10 +203,6 @@ export class MockMemoryOfflineComponentProvider extends MemoryOfflineComponentPr
   }
 
   createPersistence(cfg: ComponentConfiguration): Persistence {
-    debugAssert(
-      !cfg.persistenceSettings.durable,
-      'Can only start memory persistence'
-    );
     return new MockMemoryPersistence(
       this.gcEnabled
         ? MemoryEagerDelegate.factory

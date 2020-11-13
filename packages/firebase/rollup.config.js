@@ -16,14 +16,14 @@
  */
 
 import { resolve } from 'path';
-import resolveModule from 'rollup-plugin-node-resolve';
-import commonjs from 'rollup-plugin-commonjs';
+import resolveModule from '@rollup/plugin-node-resolve';
+import commonjs from '@rollup/plugin-commonjs';
 import sourcemaps from 'rollup-plugin-sourcemaps';
 import typescriptPlugin from 'rollup-plugin-typescript2';
 import typescript from 'typescript';
 import { uglify } from 'rollup-plugin-uglify';
 import { terser } from 'rollup-plugin-terser';
-import json from 'rollup-plugin-json';
+import json from '@rollup/plugin-json';
 import pkg from './package.json';
 
 import appPkg from './app/package.json';
@@ -70,7 +70,8 @@ const plugins = [
   commonjs()
 ];
 
-const external = Object.keys(pkg.dependencies || {});
+const deps = Object.keys(pkg.dependencies || {});
+const external = id => deps.some(dep => id === dep || id.startsWith(`${dep}/`));
 
 /**
  * Global UMD Build
@@ -134,7 +135,14 @@ const componentBuilds = pkg.components
       {
         input: `${component}/index.ts`,
         output: createUmdOutputConfig(`firebase-${component}.js`),
-        plugins: [...plugins, uglify()],
+        plugins: [
+          ...plugins,
+          uglify({
+            output: {
+              ascii_only: true // escape unicode chars
+            }
+          })
+        ],
         external: ['@firebase/app']
       }
     ];
@@ -176,10 +184,7 @@ const completeBuilds = [
    */
   {
     input: 'src/index.ts',
-    output: [
-      { file: pkg.browser, format: 'cjs', sourcemap: true },
-      { file: pkg.module, format: 'es', sourcemap: true }
-    ],
+    output: [{ file: pkg.module, format: 'es', sourcemap: true }],
     plugins,
     external
   },

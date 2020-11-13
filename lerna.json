@@ -1,11 +1,11 @@
 {
-  "lerna": "3.10.5",
   "version": "independent",
   "npmClient": "yarn",
   "packages": [
     "packages/*",
     "packages-exp/*",
-    "integration/*"
+    "integration/*",
+    "repo-scripts/*"
   ],
   "useWorkspaces": true
 }

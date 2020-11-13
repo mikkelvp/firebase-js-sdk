@@ -21,7 +21,9 @@ import {
   queryEquals,
   Filter,
   newQueryForPath,
-  queryToTarget
+  queryToTarget,
+  hasLimitToLast,
+  hasLimitToFirst
 } from '../../../src/core/query';
 import { canonifyTarget, Target, targetEquals } from '../../../src/core/target';
 import { TargetIdGenerator } from '../../../src/core/target_id_generator';
@@ -39,12 +41,10 @@ import {
   mapRpcCodeFromCode
 } from '../../../src/remote/rpc_error';
 import { debugAssert, fail } from '../../../src/util/assert';
-
 import { Code } from '../../../src/util/error';
 import { forEach } from '../../../src/util/obj';
 import { isNullOrUndefined } from '../../../src/util/types';
-import { TestSnapshotVersion, testUserDataWriter } from '../../util/helpers';
-
+import { TestSnapshotVersion } from '../../util/helpers';
 import { TimerId } from '../../../src/util/async_queue';
 import { RpcError } from './spec_rpc_error';
 import { ObjectMap } from '../../../src/util/obj_map';
@@ -62,8 +62,10 @@ import {
   SpecWriteAck,
   SpecWriteFailure
 } from './spec_test_runner';
+import { UserDataWriter } from '../../../src/api/user_data_writer';
+import { firestore } from '../../util/api_helpers';
 
-const userDataWriter = testUserDataWriter();
+const userDataWriter = new UserDataWriter(firestore());
 
 // These types are used in a protected API by SpecBuilder and need to be
 // exported.
@@ -791,6 +793,14 @@ export class SpecBuilder {
     return this;
   }
 
+  waitForPendingWrites(): this {
+    this.nextStep();
+    this.currentStep = {
+      waitForPendingWrites: true
+    };
+    return this;
+  }
+
   expectUserCallbacks(docs: {
     acknowledged?: string[];
     rejected?: string[];
@@ -942,17 +952,24 @@ export class SpecBuilder {
     return this;
   }
 
+  expectWaitForPendingWritesEvent(count = 1): this {
+    this.assertStep('Expectations require previous step');
+    const currentStep = this.currentStep!;
+    currentStep.expectedWaitForPendingWritesEvents = count;
+    return this;
+  }
+
   private static queryToSpec(query: Query): SpecQuery {
     // TODO(dimond): full query support
     const spec: SpecQuery = { path: query.path.canonicalString() };
     if (query.collectionGroup !== null) {
       spec.collectionGroup = query.collectionGroup;
     }
-    if (query.hasLimitToFirst()) {
+    if (hasLimitToFirst(query)) {
       spec.limit = query.limit!;
       spec.limitType = 'LimitToFirst';
     }
-    if (query.hasLimitToLast()) {
+    if (hasLimitToLast(query)) {
       spec.limit = query.limit!;
       spec.limitType = 'LimitToLast';
     }

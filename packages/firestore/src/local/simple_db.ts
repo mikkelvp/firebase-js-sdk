@@ -20,7 +20,6 @@ import { debugAssert } from '../util/assert';
 import { Code, FirestoreError } from '../util/error';
 import { logDebug, logError } from '../util/log';
 import { Deferred } from '../util/promise';
-import { SCHEMA_VERSION } from './indexeddb_schema';
 import { PersistencePromise } from './persistence_promise';
 
 // References to `window` are guarded by SimpleDb.isAvailable()
@@ -54,88 +53,8 @@ export interface SimpleDbSchemaConverter {
  * See PersistencePromise for more details.
  */
 export class SimpleDb {
-  /**
-   * Opens the specified database, creating or upgrading it if necessary.
-   *
-   * Note that `version` must not be a downgrade. IndexedDB does not support downgrading the schema
-   * version. We currently do not support any way to do versioning outside of IndexedDB's versioning
-   * mechanism, as only version-upgrade transactions are allowed to do things like create
-   * objectstores.
-   */
-  static openOrCreate(
-    name: string,
-    version: number,
-    schemaConverter: SimpleDbSchemaConverter
-  ): Promise<SimpleDb> {
-    debugAssert(
-      SimpleDb.isAvailable(),
-      'IndexedDB not supported in current environment.'
-    );
-    logDebug(LOG_TAG, 'Opening database:', name);
-    return new PersistencePromise<SimpleDb>((resolve, reject) => {
-      // TODO(mikelehen): Investigate browser compatibility.
-      // https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API/Using_IndexedDB
-      // suggests IE9 and older WebKit browsers handle upgrade
-      // differently. They expect setVersion, as described here:
-      // https://developer.mozilla.org/en-US/docs/Web/API/IDBVersionChangeRequest/setVersion
-      const request = indexedDB.open(name, version);
-
-      request.onsuccess = (event: Event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        resolve(new SimpleDb(db));
-      };
-
-      request.onblocked = () => {
-        reject(
-          new FirestoreError(
-            Code.FAILED_PRECONDITION,
-            'Cannot upgrade IndexedDB schema while another tab is open. ' +
-              'Close all tabs that access Firestore and reload this page to proceed.'
-          )
-        );
-      };
-
-      request.onerror = (event: Event) => {
-        const error: DOMException = (event.target as IDBOpenDBRequest).error!;
-        if (error.name === 'VersionError') {
-          reject(
-            new FirestoreError(
-              Code.FAILED_PRECONDITION,
-              'A newer version of the Firestore SDK was previously used and so the persisted ' +
-                'data is not compatible with the version of the SDK you are now using. The SDK ' +
-                'will operate with persistence disabled. If you need persistence, please ' +
-                're-upgrade to a newer version of the SDK or else clear the persisted IndexedDB ' +
-                'data for your app to start fresh.'
-            )
-          );
-        } else {
-          reject(error);
-        }
-      };
-
-      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-        logDebug(
-          LOG_TAG,
-          'Database "' + name + '" requires upgrade from version:',
-          event.oldVersion
-        );
-        const db = (event.target as IDBOpenDBRequest).result;
-        schemaConverter
-          .createOrUpgrade(
-            db,
-            request.transaction!,
-            event.oldVersion,
-            SCHEMA_VERSION
-          )
-          .next(() => {
-            logDebug(
-              LOG_TAG,
-              'Database upgrade to version ' + SCHEMA_VERSION + ' complete'
-            );
-          });
-      };
-    }).toPromise();
-  }
+  private db?: IDBDatabase;
+  private versionchangelistener?: (event: IDBVersionChangeEvent) => void;
 
   /** Deletes the specified database. */
   static delete(name: string): Promise<void> {
@@ -233,7 +152,25 @@ export class SimpleDb {
     return Number(version);
   }
 
-  constructor(private db: IDBDatabase) {
+  /*
+   * Creates a new SimpleDb wrapper for IndexedDb database `name`.
+   *
+   * Note that `version` must not be a downgrade. IndexedDB does not support
+   * downgrading the schema version. We currently do not support any way to do
+   * versioning outside of IndexedDB's versioning mechanism, as only
+   * version-upgrade transactions are allowed to do things like create
+   * objectstores.
+   */
+  constructor(
+    private readonly name: string,
+    private readonly version: number,
+    private readonly schemaConverter: SimpleDbSchemaConverter
+  ) {
+    debugAssert(
+      SimpleDb.isAvailable(),
+      'IndexedDB not supported in current environment.'
+    );
+
     const iOSVersion = SimpleDb.getIOSVersion(getUA());
     // NOTE: According to https://bugs.webkit.org/show_bug.cgi?id=197050, the
     // bug we're checking for should exist in iOS >= 12.2 and < 13, but for
@@ -249,15 +186,96 @@ export class SimpleDb {
     }
   }
 
+  /**
+   * Opens the specified database, creating or upgrading it if necessary.
+   */
+  async ensureDb(action: string): Promise<IDBDatabase> {
+    if (!this.db) {
+      logDebug(LOG_TAG, 'Opening database:', this.name);
+      this.db = await new Promise<IDBDatabase>((resolve, reject) => {
+        // TODO(mikelehen): Investigate browser compatibility.
+        // https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API/Using_IndexedDB
+        // suggests IE9 and older WebKit browsers handle upgrade
+        // differently. They expect setVersion, as described here:
+        // https://developer.mozilla.org/en-US/docs/Web/API/IDBVersionChangeRequest/setVersion
+        const request = indexedDB.open(this.name, this.version);
+
+        request.onsuccess = (event: Event) => {
+          const db = (event.target as IDBOpenDBRequest).result;
+          resolve(db);
+        };
+
+        request.onblocked = () => {
+          reject(
+            new IndexedDbTransactionError(
+              action,
+              'Cannot upgrade IndexedDB schema while another tab is open. ' +
+                'Close all tabs that access Firestore and reload this page to proceed.'
+            )
+          );
+        };
+
+        request.onerror = (event: Event) => {
+          const error: DOMException = (event.target as IDBOpenDBRequest).error!;
+          if (error.name === 'VersionError') {
+            reject(
+              new FirestoreError(
+                Code.FAILED_PRECONDITION,
+                'A newer version of the Firestore SDK was previously used and so the persisted ' +
+                  'data is not compatible with the version of the SDK you are now using. The SDK ' +
+                  'will operate with persistence disabled. If you need persistence, please ' +
+                  're-upgrade to a newer version of the SDK or else clear the persisted IndexedDB ' +
+                  'data for your app to start fresh.'
+              )
+            );
+          } else {
+            reject(new IndexedDbTransactionError(action, error));
+          }
+        };
+
+        request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+          logDebug(
+            LOG_TAG,
+            'Database "' + this.name + '" requires upgrade from version:',
+            event.oldVersion
+          );
+          const db = (event.target as IDBOpenDBRequest).result;
+          this.schemaConverter
+            .createOrUpgrade(
+              db,
+              request.transaction!,
+              event.oldVersion,
+              this.version
+            )
+            .next(() => {
+              logDebug(
+                LOG_TAG,
+                'Database upgrade to version ' + this.version + ' complete'
+              );
+            });
+        };
+      });
+    }
+
+    if (this.versionchangelistener) {
+      this.db.onversionchange = event => this.versionchangelistener!(event);
+    }
+    return this.db;
+  }
+
   setVersionChangeListener(
     versionChangeListener: (event: IDBVersionChangeEvent) => void
   ): void {
-    this.db.onversionchange = (event: IDBVersionChangeEvent) => {
-      return versionChangeListener(event);
-    };
+    this.versionchangelistener = versionChangeListener;
+    if (this.db) {
+      this.db.onversionchange = (event: IDBVersionChangeEvent) => {
+        return versionChangeListener(event);
+      };
+    }
   }
 
   async runTransaction<T>(
+    action: string,
     mode: SimpleDbTransactionMode,
     objectStores: string[],
     transactionFn: (transaction: SimpleDbTransaction) => PersistencePromise<T>
@@ -268,12 +286,15 @@ export class SimpleDb {
     while (true) {
       ++attemptNumber;
 
-      const transaction = SimpleDbTransaction.open(
-        this.db,
-        readonly ? 'readonly' : 'readwrite',
-        objectStores
-      );
       try {
+        this.db = await this.ensureDb(action);
+
+        const transaction = SimpleDbTransaction.open(
+          this.db,
+          action,
+          readonly ? 'readonly' : 'readwrite',
+          objectStores
+        );
         const transactionFnResult = transactionFn(transaction)
           .catch(error => {
             // Abort the transaction if there was an error.
@@ -307,10 +328,13 @@ export class SimpleDb {
           attemptNumber < TRANSACTION_RETRY_COUNT;
         logDebug(
           LOG_TAG,
-          'Transaction failed with error: %s. Retrying: %s.',
+          'Transaction failed with error:',
           error.message,
+          'Retrying:',
           retryable
         );
+
+        this.close();
 
         if (!retryable) {
           return Promise.reject(error);
@@ -320,7 +344,10 @@ export class SimpleDb {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      this.db.close();
+    }
+    this.db = undefined;
   }
 }
 
@@ -400,8 +427,11 @@ export interface IterateOptions {
 export class IndexedDbTransactionError extends FirestoreError {
   name = 'IndexedDbTransactionError';
 
-  constructor(cause: Error) {
-    super(Code.UNAVAILABLE, 'IndexedDB transaction failed: ' + cause);
+  constructor(actionName: string, cause: Error | string) {
+    super(
+      Code.UNAVAILABLE,
+      `IndexedDB transaction '${actionName}' failed: ${cause}`
+    );
   }
 }
 
@@ -426,20 +456,31 @@ export class SimpleDbTransaction {
 
   static open(
     db: IDBDatabase,
+    action: string,
     mode: IDBTransactionMode,
     objectStoreNames: string[]
   ): SimpleDbTransaction {
-    return new SimpleDbTransaction(db.transaction(objectStoreNames, mode));
+    try {
+      return new SimpleDbTransaction(
+        action,
+        db.transaction(objectStoreNames, mode)
+      );
+    } catch (e) {
+      throw new IndexedDbTransactionError(action, e);
+    }
   }
 
-  constructor(private readonly transaction: IDBTransaction) {
+  constructor(
+    private readonly action: string,
+    private readonly transaction: IDBTransaction
+  ) {
     this.transaction.oncomplete = () => {
       this.completionDeferred.resolve();
     };
     this.transaction.onabort = () => {
       if (transaction.error) {
         this.completionDeferred.reject(
-          new IndexedDbTransactionError(transaction.error)
+          new IndexedDbTransactionError(action, transaction.error)
         );
       } else {
         this.completionDeferred.resolve();
@@ -449,7 +490,9 @@ export class SimpleDbTransaction {
       const error = checkForAndReportiOSError(
         (event.target as IDBRequest).error!
       );
-      this.completionDeferred.reject(new IndexedDbTransactionError(error));
+      this.completionDeferred.reject(
+        new IndexedDbTransactionError(action, error)
+      );
     };
   }
 

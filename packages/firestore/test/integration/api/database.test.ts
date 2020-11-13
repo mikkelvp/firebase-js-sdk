@@ -20,23 +20,23 @@ import * as chaiAsPromised from 'chai-as-promised';
 import * as firestore from '@firebase/firestore-types';
 import { expect, use } from 'chai';
 
-import { Deferred } from '../../util/promise';
+import { Deferred } from '@firebase/util';
 import { EventsAccumulator } from '../util/events_accumulator';
 import * as firebaseExport from '../util/firebase_export';
 import {
   apiDescribe,
   withTestCollection,
+  withTestDbsSettings,
   withTestDb,
   withTestDbs,
   withTestDoc,
   withTestDocAndInitialData
 } from '../util/helpers';
-import { DEFAULT_SETTINGS } from '../util/settings';
+import { DEFAULT_SETTINGS, DEFAULT_PROJECT_ID } from '../util/settings';
 
 use(chaiAsPromised);
 
 const newTestFirestore = firebaseExport.newTestFirestore;
-const usesFunctionalApi = firebaseExport.usesFunctionalApi;
 const Timestamp = firebaseExport.Timestamp;
 const FieldPath = firebaseExport.FieldPath;
 const FieldValue = firebaseExport.FieldValue;
@@ -657,6 +657,13 @@ apiDescribe('Database', (persistence: boolean) => {
       });
     });
 
+    it('!= same as orderBy works.', () => {
+      return withTestCollection(persistence, {}, async coll => {
+        expect(() => coll.where('x', '!=', 32).orderBy('x')).not.to.throw();
+        expect(() => coll.orderBy('x').where('x', '!=', 32)).not.to.throw();
+      });
+    });
+
     it('inequality same as first orderBy works.', () => {
       return withTestCollection(persistence, {}, async coll => {
         expect(() =>
@@ -664,6 +671,17 @@ apiDescribe('Database', (persistence: boolean) => {
         ).not.to.throw();
         expect(() =>
           coll.orderBy('x').where('x', '>', 32).orderBy('y')
+        ).not.to.throw();
+      });
+    });
+
+    it('!= same as first orderBy works.', () => {
+      return withTestCollection(persistence, {}, async coll => {
+        expect(() =>
+          coll.where('x', '!=', 32).orderBy('x').orderBy('y')
+        ).not.to.throw();
+        expect(() =>
+          coll.orderBy('x').where('x', '!=', 32).orderBy('y')
         ).not.to.throw();
       });
     });
@@ -1028,6 +1046,37 @@ apiDescribe('Database', (persistence: boolean) => {
     });
   });
 
+  // eslint-disable-next-line no-restricted-properties
+  (persistence ? it : it.skip)('offline writes are sent after restart', () => {
+    return withTestDoc(persistence, async docRef => {
+      const firestore = docRef.firestore;
+
+      const app = firestore.app;
+      const name = app.name;
+      const options = app.options;
+
+      await firestore.disableNetwork();
+
+      // We are merely adding to the cache.
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      docRef.set({ foo: 'bar' });
+
+      await app.delete();
+
+      const firestore2 = newTestFirestore(
+        options.projectId,
+        name,
+        DEFAULT_SETTINGS
+      );
+      await firestore2.enablePersistence();
+      await firestore2.waitForPendingWrites();
+      const doc = await firestore2.doc(docRef.path).get();
+
+      expect(doc.exists).to.be.true;
+      expect(doc.metadata.hasPendingWrites).to.be.false;
+    });
+  });
+
   it('rejects subsequent method calls after terminate() is called', async () => {
     return withTestDb(persistence, db => {
       return db.INTERNAL.delete().then(() => {
@@ -1036,6 +1085,13 @@ apiDescribe('Database', (persistence: boolean) => {
           db.disableNetwork();
         }).to.throw('The client has already been terminated.');
       });
+    });
+  });
+
+  it('can call terminate() multiple times', async () => {
+    return withTestDb(persistence, async db => {
+      await db.terminate();
+      await db.terminate();
     });
   });
 
@@ -1141,15 +1197,7 @@ apiDescribe('Database', (persistence: boolean) => {
         const expectedError =
           'Persistence can only be cleared before a Firestore instance is ' +
           'initialized or after it is terminated.';
-        if (usesFunctionalApi()) {
-          // The modular API throws an exception rather than rejecting the
-          // Promise, which matches our overall handling of API call violations.
-          expect(() => firestore.clearPersistence()).to.throw(expectedError);
-        } else {
-          await expect(
-            firestore.clearPersistence()
-          ).to.eventually.be.rejectedWith(expectedError);
-        }
+        expect(() => firestore.clearPersistence()).to.throw(expectedError);
       });
     }
   );
@@ -1219,7 +1267,7 @@ apiDescribe('Database', (persistence: boolean) => {
     });
   });
 
-  it('calling terminate mutiple times should proceed', async () => {
+  it('calling terminate multiple times should proceed', async () => {
     await withTestDoc(persistence, async docRef => {
       const firestore = docRef.firestore;
       await firestore.terminate();
@@ -1543,5 +1591,31 @@ apiDescribe('Database', (persistence: boolean) => {
         expect(docRef.isEqual(docRef2)).to.be.false;
       });
     });
+  });
+
+  it('can set and get data with auto detect long polling enabled', () => {
+    const settings = {
+      ...DEFAULT_SETTINGS,
+      experimentalAutoDetectLongPolling: true
+    };
+
+    return withTestDbsSettings(
+      persistence,
+      DEFAULT_PROJECT_ID,
+      settings,
+      1,
+      async ([db]) => {
+        const data = { name: 'Rafi', email: 'abc@xyz.com' };
+        const doc = await db.collection('users').doc();
+
+        return doc
+          .set(data)
+          .then(() => doc.get())
+          .then(snapshot => {
+            expect(snapshot.exists).to.be.ok;
+            expect(snapshot.data()).to.deep.equal(data);
+          });
+      }
+    );
   });
 });

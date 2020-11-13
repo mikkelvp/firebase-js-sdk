@@ -25,10 +25,11 @@
  * Example: node scripts/exp/update-internal-dep-versions.js --file packages-exp/functions-exp/package.json
  */
 
-const { projectRoot } = require('../utils');
-const { mapPkgNameToPkgJson } = require('../release/utils/workspace');
-const { argv } = require('yargs');
-const fs = require('mz/fs');
+import { projectRoot } from '../utils';
+import { mapPkgNameToPkgJson } from '../release/utils/workspace';
+import { argv } from 'yargs';
+import fs from 'mz/fs';
+
 async function updateField(pkg: any, fieldName: string) {
   const field = pkg[fieldName];
   for (const depName in field) {

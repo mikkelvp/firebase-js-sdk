@@ -18,7 +18,7 @@
 import { FirebaseApp } from '@firebase/app-types';
 import { safeGet, CONSTANTS } from '@firebase/util';
 import { Repo } from './Repo';
-import { fatal } from './util/util';
+import { fatal, log } from './util/util';
 import { parseRepoInfo } from './util/libs/parser';
 import { validateUrl } from './util/validation';
 import './Repo_transaction';
@@ -31,9 +31,6 @@ import {
   EmulatorAdminTokenProvider,
   FirebaseAuthTokenProvider
 } from './AuthTokenProvider';
-
-/** @const {string} */
-const DATABASE_URL_OPTION = 'databaseURL';
 
 /**
  * This variable is also defined in the firebase node.js admin SDK. Before
@@ -91,6 +88,25 @@ export class RepoManager {
   }
 
   /**
+   * Update an existing repo in place to point to a new host/port.
+   */
+  applyEmulatorSettings(repo: Repo, host: string, port: number): void {
+    repo.repoInfo_ = new RepoInfo(
+      `${host}:${port}`,
+      /* secure= */ false,
+      repo.repoInfo_.namespace,
+      repo.repoInfo_.webSocketOnly,
+      repo.repoInfo_.nodeAdmin,
+      repo.repoInfo_.persistenceKey,
+      repo.repoInfo_.includeNamespaceInQueryParams
+    );
+
+    if (repo.repoInfo_.nodeAdmin) {
+      repo.authTokenProvider_ = new EmulatorAdminTokenProvider();
+    }
+  }
+
+  /**
    * This function should only ever be called to CREATE a new database instance.
    *
    * @param {!FirebaseApp} app
@@ -99,18 +115,23 @@ export class RepoManager {
   databaseFromApp(
     app: FirebaseApp,
     authProvider: Provider<FirebaseAuthInternalName>,
-    url?: string
+    url?: string,
+    nodeAdmin?: boolean
   ): Database {
-    let dbUrl: string | undefined = url || app.options[DATABASE_URL_OPTION];
+    let dbUrl: string | undefined = url || app.options.databaseURL;
     if (dbUrl === undefined) {
-      fatal(
-        "Can't determine Firebase Database URL.  Be sure to include " +
-          DATABASE_URL_OPTION +
-          ' option when calling firebase.initializeApp().'
-      );
+      if (!app.options.projectId) {
+        fatal(
+          "Can't determine Firebase Database URL. Be sure to include " +
+            ' a Project ID when calling firebase.initializeApp().'
+        );
+      }
+
+      log('Using default host for project ', app.options.projectId);
+      dbUrl = `${app.options.projectId}-default-rtdb.firebaseio.com`;
     }
 
-    let parsedUrl = parseRepoInfo(dbUrl);
+    let parsedUrl = parseRepoInfo(dbUrl, nodeAdmin);
     let repoInfo = parsedUrl.repoInfo;
 
     let isEmulator: boolean;
@@ -123,14 +144,14 @@ export class RepoManager {
     if (dbEmulatorHost) {
       isEmulator = true;
       dbUrl = `http://${dbEmulatorHost}?ns=${repoInfo.namespace}`;
-      parsedUrl = parseRepoInfo(dbUrl);
+      parsedUrl = parseRepoInfo(dbUrl, nodeAdmin);
       repoInfo = parsedUrl.repoInfo;
     } else {
       isEmulator = !parsedUrl.repoInfo.secure;
     }
 
     const authTokenProvider =
-      CONSTANTS.NODE_ADMIN && isEmulator
+      nodeAdmin && isEmulator
         ? new EmulatorAdminTokenProvider()
         : new FirebaseAuthTokenProvider(app, authProvider);
 
@@ -155,13 +176,13 @@ export class RepoManager {
   deleteRepo(repo: Repo) {
     const appRepos = safeGet(this.repos_, repo.app.name);
     // This should never happen...
-    if (!appRepos || safeGet(appRepos, repo.repoInfo_.toURLString()) !== repo) {
+    if (!appRepos || safeGet(appRepos, repo.key) !== repo) {
       fatal(
         `Database ${repo.app.name}(${repo.repoInfo_}) has already been deleted.`
       );
     }
     repo.interrupt();
-    delete appRepos[repo.repoInfo_.toURLString()];
+    delete appRepos[repo.key];
   }
 
   /**

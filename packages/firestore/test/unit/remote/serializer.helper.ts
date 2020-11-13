@@ -19,7 +19,7 @@ import { expect } from 'chai';
 
 import { Blob } from '../../../src/api/blob';
 import { DocumentReference } from '../../../src/api/database';
-import { FieldValue } from '../../../src/api/field_value';
+import { FieldValue } from '../../../src/compat/field_value';
 import { GeoPoint } from '../../../src/api/geo_point';
 import { Timestamp } from '../../../src/api/timestamp';
 import { DatabaseId } from '../../../src/core/database_info';
@@ -32,6 +32,7 @@ import {
   InFilter,
   KeyFieldFilter,
   LimitType,
+  NotInFilter,
   Operator,
   OrderBy,
   queryToTarget,
@@ -105,17 +106,17 @@ import {
   ref,
   setMutation,
   testUserDataReader,
-  testUserDataWriter,
   transformMutation,
   version,
   wrap,
   wrapObject
 } from '../../util/helpers';
-
 import { ByteString } from '../../../src/util/byte_string';
 import { parseQueryValue } from '../../../src/api/user_data_reader';
+import { UserDataWriter } from '../../../src/api/user_data_writer';
+import { firestore } from '../../util/api_helpers';
 
-const userDataWriter = testUserDataWriter();
+const userDataWriter = new UserDataWriter(firestore());
 const protobufJsonReader = testUserDataReader(/* useProto3Json= */ true);
 const protoJsReader = testUserDataReader(/* useProto3Json= */ false);
 
@@ -309,8 +310,8 @@ export function serializerTest(
 
       it('converts TimestampValue from proto', () => {
         const examples = [
-          new Date(Date.UTC(2016, 0, 2, 10, 20, 50, 850)),
-          new Date(Date.UTC(2016, 5, 17, 10, 50, 15, 0))
+          new Timestamp(1451730050, 850000000),
+          new Timestamp(1466160615, 0)
         ];
 
         const expectedJson = [
@@ -338,25 +339,25 @@ export function serializerTest(
           userDataWriter.convertValue({
             timestampValue: '2017-03-07T07:42:58.916123456Z'
           })
-        ).to.deep.equal(new Timestamp(1488872578, 916123456).toDate());
+        ).to.deep.equal(new Timestamp(1488872578, 916123456));
 
         expect(
           userDataWriter.convertValue({
             timestampValue: '2017-03-07T07:42:58.916123Z'
           })
-        ).to.deep.equal(new Timestamp(1488872578, 916123000).toDate());
+        ).to.deep.equal(new Timestamp(1488872578, 916123000));
 
         expect(
           userDataWriter.convertValue({
             timestampValue: '2017-03-07T07:42:58.916Z'
           })
-        ).to.deep.equal(new Timestamp(1488872578, 916000000).toDate());
+        ).to.deep.equal(new Timestamp(1488872578, 916000000));
 
         expect(
           userDataWriter.convertValue({
             timestampValue: '2017-03-07T07:42:58Z'
           })
-        ).to.deep.equal(new Timestamp(1488872578, 0).toDate());
+        ).to.deep.equal(new Timestamp(1488872578, 0));
       });
 
       it('converts TimestampValue to string (useProto3Json=true)', () => {
@@ -783,6 +784,21 @@ export function serializerTest(
         expect(roundtripped).to.be.instanceof(FieldFilter);
       });
 
+      it('converts NotEqual', () => {
+        const input = filter('field', '!=', 42);
+        const actual = toUnaryOrFieldFilter(input);
+        expect(actual).to.deep.equal({
+          fieldFilter: {
+            field: { fieldPath: 'field' },
+            op: 'NOT_EQUAL',
+            value: { integerValue: '42' }
+          }
+        });
+        const roundtripped = fromFieldFilter(actual);
+        expect(roundtripped).to.deep.equal(input);
+        expect(roundtripped).to.be.instanceof(FieldFilter);
+      });
+
       it('converts LessThan', () => {
         const input = filter('field', '<', 42);
         const actual = toUnaryOrFieldFilter(input);
@@ -899,6 +915,52 @@ export function serializerTest(
         expect(roundtripped).to.be.instanceof(InFilter);
       });
 
+      it('converts not-in', () => {
+        const input = filter('field', 'not-in', [42]);
+        const actual = toUnaryOrFieldFilter(input);
+        expect(actual).to.deep.equal({
+          fieldFilter: {
+            field: { fieldPath: 'field' },
+            op: 'NOT_IN',
+            value: {
+              arrayValue: {
+                values: [
+                  {
+                    integerValue: '42'
+                  }
+                ]
+              }
+            }
+          }
+        });
+        const roundtripped = fromFieldFilter(actual);
+        expect(roundtripped).to.deep.equal(input);
+        expect(roundtripped).to.be.instanceof(NotInFilter);
+      });
+
+      it('converts not-in with null', () => {
+        const input = filter('field', 'not-in', [null]);
+        const actual = toUnaryOrFieldFilter(input);
+        expect(actual).to.deep.equal({
+          fieldFilter: {
+            field: { fieldPath: 'field' },
+            op: 'NOT_IN',
+            value: {
+              arrayValue: {
+                values: [
+                  {
+                    nullValue: 'NULL_VALUE'
+                  }
+                ]
+              }
+            }
+          }
+        });
+        const roundtripped = fromFieldFilter(actual);
+        expect(roundtripped).to.deep.equal(input);
+        expect(roundtripped).to.be.instanceof(NotInFilter);
+      });
+
       it('converts array-contains-any', () => {
         const input = filter('field', 'array-contains-any', [42]);
         const actual = toUnaryOrFieldFilter(input);
@@ -945,6 +1007,30 @@ export function serializerTest(
           unaryFilter: {
             field: { fieldPath: 'field' },
             op: 'IS_NAN'
+          }
+        });
+        expect(fromUnaryFilter(actual)).to.deep.equal(input);
+      });
+
+      it('converts not null', () => {
+        const input = filter('field', '!=', null);
+        const actual = toUnaryOrFieldFilter(input);
+        expect(actual).to.deep.equal({
+          unaryFilter: {
+            field: { fieldPath: 'field' },
+            op: 'IS_NOT_NULL'
+          }
+        });
+        expect(fromUnaryFilter(actual)).to.deep.equal(input);
+      });
+
+      it('converts not NaN', () => {
+        const input = filter('field', '!=', NaN);
+        const actual = toUnaryOrFieldFilter(input);
+        expect(actual).to.deep.equal({
+          unaryFilter: {
+            field: { fieldPath: 'field' },
+            op: 'IS_NOT_NAN'
           }
         });
         expect(fromUnaryFilter(actual)).to.deep.equal(input);
@@ -1321,10 +1407,12 @@ export function serializerTest(
           Operator.LESS_THAN,
           Operator.LESS_THAN_OR_EQUAL,
           Operator.EQUAL,
+          Operator.NOT_EQUAL,
           Operator.GREATER_THAN,
           Operator.GREATER_THAN_OR_EQUAL,
           Operator.ARRAY_CONTAINS,
           Operator.IN,
+          Operator.NOT_IN,
           Operator.ARRAY_CONTAINS_ANY
         ];
 

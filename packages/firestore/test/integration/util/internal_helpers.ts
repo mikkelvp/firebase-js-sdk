@@ -35,7 +35,7 @@ import { newSerializer } from '../../../src/platform/serializer';
 
 /** Helper to retrieve the AsyncQueue for a give FirebaseFirestore instance. */
 export function asyncQueue(db: firestore.FirebaseFirestore): AsyncQueue {
-  return (db as Firestore)._queue;
+  return (db as Firestore)._delegate._queue;
 }
 
 export function getDefaultDatabaseInfo(): DatabaseInfo {
@@ -44,7 +44,8 @@ export function getDefaultDatabaseInfo(): DatabaseInfo {
     'persistenceKey',
     DEFAULT_SETTINGS.host!,
     !!DEFAULT_SETTINGS.ssl,
-    !!DEFAULT_SETTINGS.experimentalForceLongPolling
+    !!DEFAULT_SETTINGS.experimentalForceLongPolling,
+    !!DEFAULT_SETTINGS.experimentalAutoDetectLongPolling
   );
 }
 
@@ -53,12 +54,10 @@ export function withTestDatastore(
   credentialsProvider: CredentialsProvider = new EmptyCredentialsProvider()
 ): Promise<void> {
   const databaseInfo = getDefaultDatabaseInfo();
-  return newConnection(databaseInfo).then(conn => {
-    const serializer = newSerializer(databaseInfo.databaseId);
-    const datastore = newDatastore(credentialsProvider, serializer);
-    datastore.start(conn);
-    return fn(datastore);
-  });
+  const connection = newConnection(databaseInfo);
+  const serializer = newSerializer(databaseInfo.databaseId);
+  const datastore = newDatastore(credentialsProvider, connection, serializer);
+  return fn(datastore);
 }
 
 export class MockCredentialsProvider extends EmptyCredentialsProvider {

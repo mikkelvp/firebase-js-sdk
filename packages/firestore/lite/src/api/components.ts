@@ -18,8 +18,7 @@
 import { Datastore, newDatastore } from '../../../src/remote/datastore';
 import { newConnection } from '../../../src/platform/connection';
 import { newSerializer } from '../../../src/platform/serializer';
-import { Firestore } from './database';
-import { DatabaseInfo } from '../../../src/core/database_info';
+import { FirebaseFirestore, makeDatabaseInfo } from './database';
 import { logDebug } from '../../../src/util/log';
 import { Code, FirestoreError } from '../../../src/util/error';
 
@@ -37,14 +36,14 @@ export const DEFAULT_SSL = true;
  * An instance map that ensures only one Datastore exists per Firestore
  * instance.
  */
-const datastoreInstances = new Map<Firestore, Promise<Datastore>>();
+const datastoreInstances = new Map<FirebaseFirestore, Datastore>();
 
 /**
  * Returns an initialized and started Datastore for the given Firestore
- * instance. Callers must invoke removeDatastore() when the Firestore
+ * instance. Callers must invoke removeComponents() when the Firestore
  * instance is terminated.
  */
-export function getDatastore(firestore: Firestore): Promise<Datastore> {
+export function getDatastore(firestore: FirebaseFirestore): Datastore {
   if (firestore._terminated) {
     throw new FirestoreError(
       Code.FAILED_PRECONDITION,
@@ -53,34 +52,33 @@ export function getDatastore(firestore: Firestore): Promise<Datastore> {
   }
   if (!datastoreInstances.has(firestore)) {
     logDebug(LOG_TAG, 'Initializing Datastore');
-    const settings = firestore._getSettings();
-    const databaseInfo = new DatabaseInfo(
+    const databaseInfo = makeDatabaseInfo(
       firestore._databaseId,
       firestore._persistenceKey,
-      settings.host ?? DEFAULT_HOST,
-      settings.ssl ?? DEFAULT_SSL,
-      /* forceLongPolling= */ false
+      firestore._freezeSettings()
     );
-    const datastorePromise = newConnection(databaseInfo).then(connection => {
-      const serializer = newSerializer(databaseInfo.databaseId);
-      const datastore = newDatastore(firestore._credentials, serializer);
-      datastore.start(connection);
-      return datastore;
-    });
-    datastoreInstances.set(firestore, datastorePromise);
+    const connection = newConnection(databaseInfo);
+    const serializer = newSerializer(firestore._databaseId);
+    const datastore = newDatastore(
+      firestore._credentials,
+      connection,
+      serializer
+    );
+
+    datastoreInstances.set(firestore, datastore);
   }
   return datastoreInstances.get(firestore)!;
 }
 
 /**
  * Removes all components associated with the provided instance. Must be called
- * when the Firestore instance is terminated.
+ * when the `Firestore` instance is terminated.
  */
-export async function removeComponents(firestore: Firestore): Promise<void> {
-  const datastorePromise = await datastoreInstances.get(firestore);
-  if (datastorePromise) {
+export function removeComponents(firestore: FirebaseFirestore): void {
+  const datastore = datastoreInstances.get(firestore);
+  if (datastore) {
     logDebug(LOG_TAG, 'Removing Datastore');
     datastoreInstances.delete(firestore);
-    return (await datastorePromise).termiate();
+    datastore.terminate();
   }
 }

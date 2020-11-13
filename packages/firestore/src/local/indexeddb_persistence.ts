@@ -35,7 +35,10 @@ import {
   IndexedDbMutationQueue,
   mutationQueuesContainKey
 } from './indexeddb_mutation_queue';
-import { IndexedDbRemoteDocumentCache } from './indexeddb_remote_document_cache';
+import {
+  IndexedDbRemoteDocumentCache,
+  newIndexedDbRemoteDocumentCache
+} from './indexeddb_remote_document_cache';
 import {
   ALL_STORES,
   DbClientMetadata,
@@ -102,15 +105,13 @@ const MAX_PRIMARY_ELIGIBLE_AGE_MS = 5000;
 const CLIENT_METADATA_REFRESH_INTERVAL_MS = 4000;
 /** User-facing error when the primary lease is required but not available. */
 const PRIMARY_LEASE_EXCLUSIVE_ERROR_MSG =
-  'Failed to obtain exclusive access to the persistence layer. ' +
-  'To allow shared access, make sure to invoke ' +
-  '`enablePersistence()` with `synchronizeTabs:true` in all tabs. ' +
+  'Failed to obtain exclusive access to the persistence layer. To allow ' +
+  'shared access, multi-tab synchronization has to be enabled in all tabs. ' +
   'If you are using `experimentalForceOwningTab:true`, make sure that only ' +
   'one tab has persistence enabled at any given time.';
 const UNSUPPORTED_PLATFORM_ERROR_MSG =
-  'This platform is either missing' +
-  ' IndexedDB or is known to have an incomplete implementation. Offline' +
-  ' persistence has been disabled.';
+  'This platform is either missing IndexedDB or is known to have ' +
+  'an incomplete implementation. Offline persistence has been disabled.';
 
 // The format of the LocalStorage key that stores zombied client is:
 //     firestore_zombie_<persistence_prefix>_<instance_key>
@@ -191,10 +192,7 @@ export class IndexedDbPersistence implements Persistence {
     }
   }
 
-  // Technically `simpleDb` should be `| undefined` because it is
-  // initialized asynchronously by start(), but that would be more misleading
-  // than useful.
-  private simpleDb!: SimpleDb;
+  private simpleDb: SimpleDb;
 
   private listenSequence: ListenSequence | null = null;
 
@@ -259,12 +257,17 @@ export class IndexedDbPersistence implements Persistence {
     this.referenceDelegate = new IndexedDbLruDelegate(this, lruParams);
     this.dbName = persistenceKey + MAIN_DATABASE;
     this.serializer = new LocalSerializer(serializer);
+    this.simpleDb = new SimpleDb(
+      this.dbName,
+      SCHEMA_VERSION,
+      new SchemaConverter(this.serializer)
+    );
     this.targetCache = new IndexedDbTargetCache(
       this.referenceDelegate,
       this.serializer
     );
     this.indexManager = new IndexedDbIndexManager();
-    this.remoteDocumentCache = new IndexedDbRemoteDocumentCache(
+    this.remoteDocumentCache = newIndexedDbRemoteDocumentCache(
       this.serializer,
       this.indexManager
     );
@@ -292,17 +295,10 @@ export class IndexedDbPersistence implements Persistence {
     debugAssert(!this.started, 'IndexedDbPersistence double-started!');
     debugAssert(this.window !== null, "Expected 'window' to be defined");
 
-    return SimpleDb.openOrCreate(
-      this.dbName,
-      SCHEMA_VERSION,
-      new SchemaConverter(this.serializer)
-    )
-      .then(db => {
-        this.simpleDb = db;
-        // NOTE: This is expected to fail sometimes (in the case of another tab already
-        // having the persistence lock), so it's the first thing we should do.
-        return this.updateClientMetadataAndTryBecomePrimary();
-      })
+    // NOTE: This is expected to fail sometimes (in the case of another tab
+    // already having the persistence lock), so it's the first thing we should
+    // do.
+    return this.updateClientMetadataAndTryBecomePrimary()
       .then(() => {
         if (!this.isPrimary && !this.allowTabSynchronization) {
           // Fail `start()` if `synchronizeTabs` is disabled and we cannot
@@ -685,13 +681,23 @@ export class IndexedDbPersistence implements Persistence {
     }
     this.detachVisibilityHandler();
     this.detachWindowUnloadHook();
-    await this.runTransaction('shutdown', 'readwrite', txn => {
-      return this.releasePrimaryLeaseIfHeld(txn).next(() =>
-        this.removeClientMetadata(txn)
-      );
-    }).catch(e => {
-      logDebug(LOG_TAG, 'Proceeding with shutdown despite failure: ', e);
-    });
+
+    // Use `SimpleDb.runTransaction` directly to avoid failing if another tab
+    // has obtained the primary lease.
+    await this.simpleDb.runTransaction(
+      'shutdown',
+      'readwrite',
+      [DbPrimaryClient.store, DbClientMetadata.store],
+      simpleDbTxn => {
+        const persistenceTransaction = new IndexedDbTransaction(
+          simpleDbTxn,
+          ListenSequence.INVALID
+        );
+        return this.releasePrimaryLeaseIfHeld(persistenceTransaction).next(() =>
+          this.removeClientMetadata(persistenceTransaction)
+        );
+      }
+    );
     this.simpleDb.close();
 
     // Remove the entry marking the client as zombied from LocalStorage since
@@ -790,7 +796,7 @@ export class IndexedDbPersistence implements Persistence {
     // Do all transactions as readwrite against all object stores, since we
     // are the only reader/writer.
     return this.simpleDb
-      .runTransaction(simpleDbMode, ALL_STORES, simpleDbTxn => {
+      .runTransaction(action, simpleDbMode, ALL_STORES, simpleDbTxn => {
         persistenceTransaction = new IndexedDbTransaction(
           simpleDbTxn,
           this.listenSequence
