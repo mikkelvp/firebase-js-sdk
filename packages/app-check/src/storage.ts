@@ -52,35 +52,43 @@ function getDBPromise(): Promise<IDBDatabase> {
   }
 
   dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    try {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onsuccess = event => {
-      resolve((event.target as IDBOpenDBRequest).result);
-    };
+      request.onsuccess = event => {
+        resolve((event.target as IDBOpenDBRequest).result);
+      };
 
-    request.onerror = event => {
+      request.onerror = event => {
+        reject(
+          ERROR_FACTORY.create(AppCheckError.STORAGE_OPEN, {
+            originalErrorMessage: (event.target as IDBRequest).error?.message
+          })
+        );
+      };
+
+      request.onupgradeneeded = event => {
+        const db = (event.target as IDBOpenDBRequest).result;
+
+        // We don't use 'break' in this switch statement, the fall-through
+        // behavior is what we want, because if there are multiple versions between
+        // the old version and the current version, we want ALL the migrations
+        // that correspond to those versions to run, not only the last one.
+        // eslint-disable-next-line default-case
+        switch (event.oldVersion) {
+          case 0:
+            db.createObjectStore(STORE_NAME, {
+              keyPath: 'compositeKey'
+            });
+        }
+      };
+    } catch (e) {
       reject(
         ERROR_FACTORY.create(AppCheckError.STORAGE_OPEN, {
-          originalErrorMessage: (event.target as IDBRequest).error?.message
+          originalErrorMessage: e.message
         })
       );
-    };
-
-    request.onupgradeneeded = event => {
-      const db = (event.target as IDBOpenDBRequest).result;
-
-      // We don't use 'break' in this switch statement, the fall-through
-      // behavior is what we want, because if there are multiple versions between
-      // the old version and the current version, we want ALL the migrations
-      // that correspond to those versions to run, not only the last one.
-      // eslint-disable-next-line default-case
-      switch (event.oldVersion) {
-        case 0:
-          db.createObjectStore(STORE_NAME, {
-            keyPath: 'compositeKey'
-          });
-      }
-    };
+    }
   });
 
   return dbPromise;

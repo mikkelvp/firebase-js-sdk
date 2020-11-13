@@ -18,7 +18,7 @@
 import '../test/setup';
 import { writeTokenToStorage, readTokenFromStorage } from './storage';
 import { getFakeApp } from '../test/util';
-import * as util from './util';
+import * as util from '@firebase/util';
 import { expect } from 'chai';
 import { stub } from 'sinon';
 

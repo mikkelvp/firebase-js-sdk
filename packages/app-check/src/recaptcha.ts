@@ -45,14 +45,14 @@ export function initialize(app: FirebaseApp): Promise<GreCAPTCHA> {
         throw new Error('no recaptcha');
       }
       grecaptcha.ready(() => {
-        // Invisible widgets allow us to set a different siteKey for each widget, so we use them to can support multiple apps
-        renderInvisibleWidget(app, divId);
+        // Invisible widgets allow us to set a different siteKey for each widget, so we use them to support multiple apps
+        renderInvisibleWidget(app, grecaptcha, divId);
         initialized.resolve(grecaptcha);
       });
     });
   } else {
     grecaptcha.ready(() => {
-      renderInvisibleWidget(app, divId);
+      renderInvisibleWidget(app, grecaptcha, divId);
       initialized.resolve(grecaptcha);
     });
   }
@@ -84,13 +84,11 @@ export async function getToken(app: FirebaseApp): Promise<string> {
  * @param app
  * @param container - Id of a HTML element.
  */
-function renderInvisibleWidget(app: FirebaseApp, container: string): void {
-  const grecaptcha = getRecaptcha();
-
-  // it shouldn't happen.
-  if (!grecaptcha) {
-    throw new Error('no recaptcha');
-  }
+function renderInvisibleWidget(
+  app: FirebaseApp,
+  grecaptcha: GreCAPTCHA,
+  container: string
+): void {
   const widgetId = grecaptcha.render(container, {
     // TODO: confirm how we get siteKey.
     // Should we retrieve it dynamically? probably not, since it will add significant latency
