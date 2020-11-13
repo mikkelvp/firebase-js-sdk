@@ -48,20 +48,16 @@ export async function getToken(
   /**
    * try to load token from indexedDB if it's the first time this function is called
    */
-  try {
-    if (!token) {
-      const cachedToken = await readTokenFromStorage(app);
-      if (cachedToken && isValid(cachedToken)) {
-        token = cachedToken;
+  if (!token) {
+    // readTokenFromStorage() always resolves. In case of an error, it resolves with `undefined`.
+    const cachedToken = await readTokenFromStorage(app);
+    if (cachedToken && isValid(cachedToken)) {
+      token = cachedToken;
 
-        setState(app, { ...state, token });
-        // notify all listeners with the cached token
-        notifyTokenListeners(app, token);
-      }
+      setState(app, { ...state, token });
+      // notify all listeners with the cached token
+      notifyTokenListeners(app, token);
     }
-  } catch (e) {
-    // In case reading local token failed, swallow the error and try to get a new token
-    console.warn(`Failed to read token from indexeddb. Error: ${e}`);
   }
 
   // return the cached token if it's valid

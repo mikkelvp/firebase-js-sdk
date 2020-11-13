@@ -17,141 +17,42 @@
 
 import { AppCheckTokenLocal } from '@firebase/app-check/src/state';
 import { FirebaseApp } from '@firebase/app-types';
-import { ERROR_FACTORY, AppCheckError } from './errors';
 import { isIndexedDBAvailable } from '@firebase/util';
+import { readTokenFromIndexedDB, writeTokenToIndexedDB } from './indexeddb';
 
-export function readTokenFromStorage(
+/**
+ * Always resolves. In case of an error reading from indexeddb, resolve with undefined
+ */
+export async function readTokenFromStorage(
   app: FirebaseApp
 ): Promise<AppCheckTokenLocal | undefined> {
   if (isIndexedDBAvailable()) {
-    return readTokenFromIndexedDB(app);
+    let token = undefined;
+    try {
+      token = await readTokenFromIndexedDB(app);
+    } catch (e) {
+      // swallow the error and return undefined
+      console.warn(`Failed to read token from indexeddb. Error: ${e}`);
+    }
+    return token;
   }
 
-  return Promise.resolve(undefined);
+  return undefined;
 }
 
+/**
+ * Always resolves. In case of an error writing to indexeddb, print a warning and resolve the promise
+ */
 export function writeTokenToStorage(
   app: FirebaseApp,
   token: AppCheckTokenLocal
 ): Promise<void> {
   if (isIndexedDBAvailable()) {
-    return writeTokenToIndexedDB(app, token);
+    return writeTokenToIndexedDB(app, token).catch(e => {
+      // swallow the error and resolve the promise
+      console.warn(`Failed to write token to indexeddb. Error: ${e}`);
+    });
   }
 
   return Promise.resolve();
-}
-
-const DB_NAME = 'firebase-app-check-database';
-const DB_VERSION = 1;
-const STORE_NAME = 'firebase-app-check-store';
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-function getDBPromise(): Promise<IDBDatabase> {
-  if (dbPromise) {
-    return dbPromise;
-  }
-
-  dbPromise = new Promise((resolve, reject) => {
-    try {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-      request.onsuccess = event => {
-        resolve((event.target as IDBOpenDBRequest).result);
-      };
-
-      request.onerror = event => {
-        reject(
-          ERROR_FACTORY.create(AppCheckError.STORAGE_OPEN, {
-            originalErrorMessage: (event.target as IDBRequest).error?.message
-          })
-        );
-      };
-
-      request.onupgradeneeded = event => {
-        const db = (event.target as IDBOpenDBRequest).result;
-
-        // We don't use 'break' in this switch statement, the fall-through
-        // behavior is what we want, because if there are multiple versions between
-        // the old version and the current version, we want ALL the migrations
-        // that correspond to those versions to run, not only the last one.
-        // eslint-disable-next-line default-case
-        switch (event.oldVersion) {
-          case 0:
-            db.createObjectStore(STORE_NAME, {
-              keyPath: 'compositeKey'
-            });
-        }
-      };
-    } catch (e) {
-      reject(
-        ERROR_FACTORY.create(AppCheckError.STORAGE_OPEN, {
-          originalErrorMessage: e.message
-        })
-      );
-    }
-  });
-
-  return dbPromise;
-}
-
-async function readTokenFromIndexedDB(
-  app: FirebaseApp
-): Promise<AppCheckTokenLocal | undefined> {
-  const db = await getDBPromise();
-
-  const transaction = db.transaction(STORE_NAME, 'readonly');
-  const store = transaction.objectStore(STORE_NAME);
-  const request = store.get(computeKey(app));
-
-  return new Promise((resolve, reject) => {
-    request.onsuccess = event => {
-      const result = (event.target as IDBRequest).result;
-
-      if (result) {
-        resolve(result.value);
-      } else {
-        resolve(undefined);
-      }
-    };
-
-    transaction.onerror = event => {
-      reject(
-        ERROR_FACTORY.create(AppCheckError.STORAGE_GET, {
-          originalErrorMessage: (event.target as IDBRequest).error?.message
-        })
-      );
-    };
-  });
-}
-
-async function writeTokenToIndexedDB(
-  app: FirebaseApp,
-  token: AppCheckTokenLocal
-): Promise<void> {
-  const db = await getDBPromise();
-
-  const transaction = db.transaction(STORE_NAME, 'readwrite');
-  const store = transaction.objectStore(STORE_NAME);
-  const request = store.put({
-    compositeKey: computeKey(app),
-    value: token
-  });
-
-  return new Promise((resolve, reject) => {
-    request.onsuccess = _event => {
-      resolve();
-    };
-
-    transaction.onerror = event => {
-      reject(
-        ERROR_FACTORY.create(AppCheckError.STORAGE_WRITE, {
-          originalErrorMessage: (event.target as IDBRequest).error?.message
-        })
-      );
-    };
-  });
-}
-
-function computeKey(app: FirebaseApp): string {
-  return `${app.options.appId}-${app.name}`;
 }

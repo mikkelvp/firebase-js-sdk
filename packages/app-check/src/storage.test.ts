@@ -17,6 +17,7 @@
 
 import '../test/setup';
 import { writeTokenToStorage, readTokenFromStorage } from './storage';
+import * as indexeddbOperations from './indexeddb';
 import { getFakeApp } from '../test/util';
 import * as util from '@firebase/util';
 import { expect } from 'chai';
@@ -40,8 +41,22 @@ describe('Storage', () => {
     expect(await readTokenFromStorage(app)).to.equal(undefined);
   });
 
+  it('writeTokenToStorage() still resolves if writing to indexeddb failed', () => {
+    stub(indexeddbOperations, 'writeTokenToIndexedDB').returns(
+      Promise.reject('something went wrong!')
+    );
+    expect(writeTokenToStorage(app, fakeToken)).to.eventually.fulfilled;
+  });
+
   it('resolves with undefined if indexeddb is not available', async () => {
     stub(util, 'isIndexedDBAvailable').returns(false);
+    expect(await readTokenFromStorage(app)).to.equal(undefined);
+  });
+
+  it('resolves with undefined if reading indexeddb failed', async () => {
+    stub(indexeddbOperations, 'readTokenFromIndexedDB').returns(
+      Promise.reject('something went wrong!')
+    );
     expect(await readTokenFromStorage(app)).to.equal(undefined);
   });
 });

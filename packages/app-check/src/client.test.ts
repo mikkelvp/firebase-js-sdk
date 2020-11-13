@@ -88,7 +88,10 @@ describe('client', () => {
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
       expect(e).has.property('message', firebaseError.message);
-      expect(e).has.property('originalErrorMessage', 'Network request failed');
+      expect(e).has.nested.property(
+        'customData.originalErrorMessage',
+        'Network request failed'
+      );
     }
   });
 
@@ -113,7 +116,7 @@ describe('client', () => {
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
       expect(e).has.property('message', firebaseError.message);
-      expect(e).has.property('httpStatus', 500);
+      expect(e).has.nested.property('customData.httpStatus', 500);
     }
   });
 
@@ -140,7 +143,10 @@ describe('client', () => {
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
       expect(e).has.property('message', firebaseError.message);
-      expect(e).has.property('originalErrorMessage', originalError.message);
+      expect(e).has.nested.property(
+        'customData.originalErrorMessage',
+        originalError.message
+      );
     }
   });
 
@@ -170,8 +176,8 @@ describe('client', () => {
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
       expect(e).has.property('message', firebaseError.message);
-      expect(e).has.property(
-        'originalErrorMessage',
+      expect(e).has.nested.property(
+        'customData.originalErrorMessage',
         `timeToLive is not a number, NAN`
       );
     }
