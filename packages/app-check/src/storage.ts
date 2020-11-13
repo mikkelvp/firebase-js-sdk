@@ -18,7 +18,7 @@
 import { AppCheckTokenLocal } from '@firebase/app-check/src/state';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
-import { isIndexedDBAvailable } from './util';
+import { isIndexedDBAvailable } from '@firebase/util';
 
 export function readTokenFromStorage(
   app: FirebaseApp
