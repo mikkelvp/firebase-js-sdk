@@ -66,7 +66,7 @@ describe('proactive refresh', () => {
     clock.restore();
   });
 
-  it('retris on retriable errors', async () => {
+  it('retries on retriable errors', async () => {
     const waitTime = 10;
     let counter = 0;
     const successOperation = new Deferred();
