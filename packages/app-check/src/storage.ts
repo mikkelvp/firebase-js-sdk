@@ -15,14 +15,14 @@
  * limitations under the License.
  */
 
-import { AppCheckToken } from '@firebase/app-check-interop-types';
+import { AppCheckTokenLocal } from '@firebase/app-check/src/state';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 import { isIndexedDBAvailable } from './util';
 
 export function readTokenFromStorage(
   app: FirebaseApp
-): Promise<AppCheckToken | undefined> {
+): Promise<AppCheckTokenLocal | undefined> {
   if (isIndexedDBAvailable()) {
     return readTokenFromIndexedDB(app);
   }
@@ -32,7 +32,7 @@ export function readTokenFromStorage(
 
 export function writeTokenToStorage(
   app: FirebaseApp,
-  token: AppCheckToken
+  token: AppCheckTokenLocal
 ): Promise<void> {
   if (isIndexedDBAvailable()) {
     return writeTokenToIndexedDB(app, token);
@@ -88,7 +88,7 @@ function getDBPromise(): Promise<IDBDatabase> {
 
 async function readTokenFromIndexedDB(
   app: FirebaseApp
-): Promise<AppCheckToken | undefined> {
+): Promise<AppCheckTokenLocal | undefined> {
   const db = await getDBPromise();
 
   const transaction = db.transaction(STORE_NAME, 'readonly');
@@ -118,7 +118,7 @@ async function readTokenFromIndexedDB(
 
 async function writeTokenToIndexedDB(
   app: FirebaseApp,
-  token: AppCheckToken
+  token: AppCheckTokenLocal
 ): Promise<void> {
   const db = await getDBPromise();
 

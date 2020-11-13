@@ -16,8 +16,9 @@
  */
 export const BASE_ENDPOINT =
   'https://autopush-firebaseappcheck-pa.sandbox.googleapis.com/v1alpha';
-export const EXCHANGE_CUSTOM_TOKEN_METHOD = 'exchangeCustomToken';
+
 export const EXCHANGE_RECAPTCHA_TOKEN_METHOD = 'exchangeRecaptchaToken';
+
 export const TOKEN_REFRESH_TIME = {
   /**
    * The offset time before token natural expiration to run the refresh.
@@ -34,3 +35,6 @@ export const TOKEN_REFRESH_TIME = {
    */
   RETRIAL_MAX_WAIT: 16 * 60 * 1000
 };
+
+// TODO: replace with the actual dummy token value once it is decided
+export const DUMMY_TOKEN = 'DUMMY_TOKEN';

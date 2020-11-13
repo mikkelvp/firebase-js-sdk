@@ -28,7 +28,15 @@ interface AppCheckProvider {
    * returns a AppCheckProvider Token, e.g. reCAPTCHA token
    * We will use this token to exchange for the Firebase AppCheckToken
    */
-  getToken(): Promise<string>;
+  getToken(): Promise<AppCheckToken>;
+}
+
+interface AppCheckToken {
+  readonly token: string;
+  /**
+   * The time after which the token will expire in ms
+   */
+  readonly timeToLive: number;
 }
 
 declare module '@firebase/component' {

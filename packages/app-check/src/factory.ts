@@ -33,7 +33,7 @@ export function factory(app: FirebaseApp): FirebaseAppCheck {
 
 export function internalFactory(app: FirebaseApp): FirebaseAppCheckInternal {
   return {
-    getToken: () => getToken(app),
+    getToken: forceRefresh => getToken(app, forceRefresh),
     addTokenListener: listener => addTokenListener(app, listener),
     removeTokenListener: listener => removeTokenListener(app, listener)
   };

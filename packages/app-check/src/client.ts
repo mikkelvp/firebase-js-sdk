@@ -15,14 +15,10 @@
  * limitations under the License.
  */
 
-import { AppCheckToken } from '@firebase/app-check-interop-types';
-import {
-  BASE_ENDPOINT,
-  EXCHANGE_RECAPTCHA_TOKEN_METHOD,
-  EXCHANGE_CUSTOM_TOKEN_METHOD
-} from './constants';
+import { BASE_ENDPOINT, EXCHANGE_RECAPTCHA_TOKEN_METHOD } from './constants';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
+import { AppCheckTokenLocal } from './state';
 
 interface AppCheckResponse {
   attestationToken: string;
@@ -37,7 +33,7 @@ interface AppCheckRequest {
 export async function exchangeToken({
   url,
   body
-}: AppCheckRequest): Promise<AppCheckToken> {
+}: AppCheckRequest): Promise<AppCheckTokenLocal> {
   const options = {
     method: 'POST',
     body: JSON.stringify(body),
@@ -80,20 +76,6 @@ export async function exchangeToken({
   return {
     token: responseBody.attestationToken,
     expirationTime: Date.now() + timeToLiveAsNumber
-  };
-}
-
-export function getExchangeCustomTokenRequest(
-  app: FirebaseApp,
-  customToken: string
-): AppCheckRequest {
-  const { projectId, appId, apiKey } = app.options;
-
-  return {
-    url: `${BASE_ENDPOINT}/projects/${projectId}/apps/${appId}:${EXCHANGE_CUSTOM_TOKEN_METHOD}?key=${apiKey}`,
-    body: {
-      custom_token: customToken
-    }
   };
 }
 

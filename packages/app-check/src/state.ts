@@ -17,19 +17,21 @@
 
 import { FirebaseApp } from '@firebase/app-types';
 import { AppCheckProvider } from '@firebase/app-check-types';
-import {
-  AppCheckTokenListener,
-  AppCheckToken
-} from '@firebase/app-check-interop-types';
+import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
 import { Refresher } from './proactive-refresh';
 import { Deferred } from '@firebase/util';
 import { GreCAPTCHA } from './recaptcha';
+
+export interface AppCheckTokenLocal {
+  token: string;
+  expirationTime: number;
+}
 
 export interface AppCheckState {
   activated: boolean;
   tokenListeners: AppCheckTokenListener[];
   customProvider?: AppCheckProvider;
-  token?: AppCheckToken;
+  token?: AppCheckTokenLocal;
   tokenRefresher?: Refresher;
   reCAPTCHAState?: ReCAPTCHAState;
 }

@@ -18,65 +18,88 @@
 import { getToken as getReCAPTCHAToken } from './recaptcha';
 import { FirebaseApp } from '@firebase/app-types';
 import {
-  AppCheckToken,
+  AppCheckTokenResult,
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
-import { getState, setState } from './state';
-import { TOKEN_REFRESH_TIME } from './constants';
+import { AppCheckToken as AppCheckTokenCustom } from '@firebase/app-check-types';
+import { AppCheckTokenLocal, getState, setState } from './state';
+import { TOKEN_REFRESH_TIME, DUMMY_TOKEN } from './constants';
 import { Refresher } from './proactive-refresh';
 import { ensureActivated } from './util';
-import {
-  exchangeToken,
-  getExchangeCustomTokenRequest,
-  getExchangeRecaptchaTokenRequest
-} from './client';
+import { exchangeToken, getExchangeRecaptchaTokenRequest } from './client';
 import { writeTokenToStorage, readTokenFromStorage } from './storage';
 
+/**
+ * This function will always resolve.
+ * The result will contain an error field if there is any error.
+ * In case there is an error, the token field in the result will be populated with a dummy value
+ */
 export async function getToken(
   app: FirebaseApp,
   forceRefresh = false
-): Promise<AppCheckToken | null> {
+): Promise<AppCheckTokenResult> {
   ensureActivated(app);
 
   const state = getState(app);
 
-  let token: AppCheckToken | undefined = state.token;
-  // try to load token from indexedDB if it's the first time this function is called
-  if (!token) {
-    const cachedToken = await readTokenFromStorage(app);
-    if (cachedToken && isValid(cachedToken)) {
-      token = cachedToken;
+  let token: AppCheckTokenLocal | undefined = state.token;
+  let error: Error | undefined = undefined;
 
-      setState(app, { ...state, token });
-      // notify all listeners with the cached token
-      notifyTokenListeners(app, token);
+  try {
+    // try to load token from indexedDB if it's the first time this function is called
+    if (!token) {
+      const cachedToken = await readTokenFromStorage(app);
+      if (cachedToken && isValid(cachedToken)) {
+        token = cachedToken;
+
+        setState(app, { ...state, token });
+        // notify all listeners with the cached token
+        notifyTokenListeners(app, token);
+      }
     }
+  } catch (e) {
+    // In case reading local token failed, swallow the error and try to get a new token
+    console.warn(`Failed to read token from indexeddb. Error: ${e}`);
   }
+
   // return the cached token if it's valid
   if (!forceRefresh && token && isValid(token)) {
     return token;
   }
 
-  // request new token
-  if (state.customProvider) {
-    const attestedClaimsToken = await state.customProvider.getToken();
-    token = await exchangeToken(
-      getExchangeCustomTokenRequest(app, attestedClaimsToken)
-    );
-  } else {
-    const attestedClaimsToken = await getReCAPTCHAToken(app);
-    token = await exchangeToken(
-      getExchangeRecaptchaTokenRequest(app, attestedClaimsToken)
-    );
+  try {
+    // request a new token
+    if (state.customProvider) {
+      const appCheckTokenCustom: AppCheckTokenCustom = await state.customProvider.getToken();
+      token = {
+        ...appCheckTokenCustom,
+        expirationTime: Date.now() + appCheckTokenCustom.timeToLive
+      };
+    } else {
+      const attestedClaimsToken = await getReCAPTCHAToken(app);
+      token = await exchangeToken(
+        getExchangeRecaptchaTokenRequest(app, attestedClaimsToken)
+      );
+    }
+  } catch (e) {
+    error = e;
   }
 
-  // write the new token to the memory state as well as the persistent storage
-  setState(app, { ...state, token });
-  await writeTokenToStorage(app, token);
+  let interopTokenResult: AppCheckTokenResult | undefined = token;
+  if (!interopTokenResult) {
+    // if token is undefined, there must be an error.
+    // we return a dummy token along with the error
+    interopTokenResult = makeDummyTokenResult(error!);
+  } else {
+    // write the new token to the memory state as well as the persistent storage.
+    // Only do it if we got a valid new token
+    setState(app, { ...state, token });
+    await writeTokenToStorage(app, token!);
+  }
 
-  notifyTokenListeners(app, token);
+  notifyTokenListeners(app, interopTokenResult);
 
-  return token;
+  return interopTokenResult;
 }
 
 export function addTokenListener(
@@ -132,14 +155,20 @@ function createTokenRefresher(app: FirebaseApp): Refresher {
   return new Refresher(
     // Keep in mind when this fails for any reason other than the ones
     // for which we should retry, it will effectively stop the proactive refresh.
-    () => {
+    async () => {
       const state = getState(app);
       // If there is no token, we will try to load it from storage and use it
       // If there is a token, we force refresh it because we know it's going to expire soon
+      let result;
       if (!state.token) {
-        return getToken(app);
+        result = await getToken(app);
       } else {
-        return getToken(app, true);
+        result = await getToken(app, true);
+      }
+
+      // getToken() always resolves. In case the result has an error field defined, it means the operation failed, and we should retry.
+      if (result.error) {
+        throw result.error;
       }
     },
     () => {
@@ -165,7 +194,10 @@ function createTokenRefresher(app: FirebaseApp): Refresher {
   );
 }
 
-function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
+function notifyTokenListeners(
+  app: FirebaseApp,
+  token: AppCheckTokenResult
+): void {
   const listeners = getState(app).tokenListeners;
 
   for (const listener of listeners) {
@@ -177,6 +209,13 @@ function notifyTokenListeners(app: FirebaseApp, token: AppCheckToken): void {
   }
 }
 
-function isValid(token: AppCheckToken): boolean {
+function isValid(token: AppCheckTokenLocal): boolean {
   return token.expirationTime - Date.now() > 0;
+}
+
+function makeDummyTokenResult(error: Error): AppCheckTokenResult {
+  return {
+    token: DUMMY_TOKEN,
+    error
+  };
 }

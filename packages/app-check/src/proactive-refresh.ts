@@ -67,8 +67,8 @@ export class Refresher {
       await sleep(this.getNextRun(hasSucceeded));
 
       // Why do we resolve a promise, then immediate wait for it?
-      // We do it in order to make the promise chain cancellable.
-      // We could call stop() which rejects the promise before the following line execute, which makes
+      // We do it to make the promise chain cancellable.
+      // We can call stop() which rejects the promise before the following line execute, which makes
       // the code jump to the catch block.
       // TODO: unit test this
       this.pending.resolve();

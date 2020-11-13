@@ -18,7 +18,7 @@
 export interface FirebaseAppCheckInternal {
   // Get the current AttestationToken. Attaches to the most recent in-flight request if one
   // is present. Returns null if no token is present and no token requests are in-flight.
-  getToken(): Promise<AppCheckToken | null>;
+  getToken(forceRefresh?: boolean): Promise<AppCheckTokenResult>;
 
   // Registers a listener to changes in the token state. There can be more than one listener
   // registered at the same time for one or more FirebaseAppAttestation instances. The
@@ -30,14 +30,12 @@ export interface FirebaseAppCheckInternal {
   removeTokenListener(listener: AppCheckTokenListener): void;
 }
 
-type AppCheckTokenListener = (token: AppCheckToken | null) => void;
+type AppCheckTokenListener = (token: AppCheckTokenResult) => void;
 
-interface AppCheckToken {
+// If the error field is defined, the token field will be populated with a dummy token
+interface AppCheckTokenResult {
   readonly token: string;
-  /**
-   * Unix timestamp when AppTestation Token expires in local device time.
-   */
-  readonly expirationTime: number;
+  readonly error?: Error;
 }
 
 declare module '@firebase/component' {
