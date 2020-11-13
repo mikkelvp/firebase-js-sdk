@@ -45,8 +45,10 @@ export async function getToken(
   let token: AppCheckTokenLocal | undefined = state.token;
   let error: Error | undefined = undefined;
 
+  /**
+   * try to load token from indexedDB if it's the first time this function is called
+   */
   try {
-    // try to load token from indexedDB if it's the first time this function is called
     if (!token) {
       const cachedToken = await readTokenFromStorage(app);
       if (cachedToken && isValid(cachedToken)) {
@@ -64,11 +66,15 @@ export async function getToken(
 
   // return the cached token if it's valid
   if (!forceRefresh && token && isValid(token)) {
-    return token;
+    return {
+      token: token.token
+    };
   }
 
+  /**
+   * request a new token
+   */
   try {
-    // request a new token
     if (state.customProvider) {
       const appCheckTokenCustom: AppCheckTokenCustom = await state.customProvider.getToken();
       token = {
@@ -85,20 +91,23 @@ export async function getToken(
     error = e;
   }
 
-  let interopTokenResult: AppCheckTokenResult | undefined = token;
-  if (!interopTokenResult) {
+  let interopTokenResult: AppCheckTokenResult | undefined;
+  if (!token) {
     // if token is undefined, there must be an error.
     // we return a dummy token along with the error
     interopTokenResult = makeDummyTokenResult(error!);
   } else {
-    // write the new token to the memory state as well as the persistent storage.
+    interopTokenResult = {
+      token: token.token
+    };
+    // write the new token to the memory state as well ashe persistent storage.
     // Only do it if we got a valid new token
     setState(app, { ...state, token });
-    await writeTokenToStorage(app, token!);
+    await writeTokenToStorage(app, token);
   }
 
   notifyTokenListeners(app, interopTokenResult);
-
+  console.log('the returned token is ', interopTokenResult);
   return interopTokenResult;
 }
 

@@ -31,6 +31,7 @@ import * as client from './client';
 import * as storage from './storage';
 import { getState, clearState, setState } from './state';
 import { AppCheckTokenListener } from '@firebase/app-check-interop-types';
+import { DUMMY_TOKEN } from './constants';
 
 describe('internal api', () => {
   let app: FirebaseApp;
@@ -47,27 +48,26 @@ describe('internal api', () => {
       token: 'fake-recaptcha-app-check-token',
       expirationTime: 123
     };
-    const fakeCustomAppCheckToken = {
-      token: 'fake-custom-app-check-token',
-      expirationTime: 123
-    };
+
     const fakeCachedAppCheckToken = {
       token: 'fake-cached-app-check-token',
       expirationTime: 123
     };
 
-    it('uses custom token to exchange for AppCheck token if customTokenProvider is provided', async () => {
+    it('uses customTokenProvider to get an AppCheck token', async () => {
+      const clock = useFakeTimers();
       const customTokenProvider = getFakeCustomTokenProvider();
       const customProviderSpy = spy(customTokenProvider, 'getToken');
-      stub(client, 'exchangeToken').returns(
-        Promise.resolve(fakeCustomAppCheckToken)
-      );
 
       activate(app, customTokenProvider);
       const token = await getToken(app);
 
       expect(customProviderSpy).to.be.called;
-      expect(token).to.deep.equal(fakeCustomAppCheckToken);
+      expect(token).to.deep.equal({
+        token: 'fake-custom-app-check-token'
+      });
+
+      clock.restore();
     });
 
     it('uses reCAPTCHA token to exchange for AppCheck token if no customTokenProvider is provided', async () => {
@@ -83,7 +83,23 @@ describe('internal api', () => {
       const token = await getToken(app);
 
       expect(reCAPTCHASpy).to.be.called;
-      expect(token).to.deep.equal(fakeRecaptchaAppCheckToken);
+      expect(token).to.deep.equal({ token: fakeRecaptchaAppCheckToken.token });
+    });
+
+    it('resolves with a dummy token and an error if failed to get a token', async () => {
+      activate(app);
+
+      const reCAPTCHASpy = stub(reCAPTCHA, 'getToken').returns(
+        Promise.resolve(fakeRecaptchaToken)
+      );
+
+      const error = new Error('oops, something went wrong');
+      stub(client, 'exchangeToken').returns(Promise.reject(error));
+
+      const token = await getToken(app);
+
+      expect(reCAPTCHASpy).to.be.called;
+      expect(token).to.deep.equal({ token: DUMMY_TOKEN, error });
     });
 
     it('notifies listeners using cached token', async () => {
@@ -123,8 +139,12 @@ describe('internal api', () => {
 
       await getToken(app);
 
-      expect(listener1).to.be.calledWith(fakeRecaptchaAppCheckToken);
-      expect(listener2).to.be.calledWith(fakeRecaptchaAppCheckToken);
+      expect(listener1).to.be.calledWith({
+        token: fakeRecaptchaAppCheckToken.token
+      });
+      expect(listener2).to.be.calledWith({
+        token: fakeRecaptchaAppCheckToken.token
+      });
     });
 
     it('ignores listeners that throw', async () => {
@@ -143,7 +163,9 @@ describe('internal api', () => {
 
       await getToken(app);
 
-      expect(listener2).to.be.calledWith(fakeRecaptchaAppCheckToken);
+      expect(listener2).to.be.calledWith({
+        token: fakeRecaptchaAppCheckToken.token
+      });
     });
 
     it('loads persisted token to memory and returns it', async () => {
@@ -157,7 +179,9 @@ describe('internal api', () => {
       const clientStub = stub(client, 'exchangeToken');
 
       expect(getState(app).token).to.equal(undefined);
-      expect(await getToken(app)).to.equal(fakeCachedAppCheckToken);
+      expect(await getToken(app)).to.deep.equal({
+        token: fakeCachedAppCheckToken.token
+      });
       expect(getState(app).token).to.equal(fakeCachedAppCheckToken);
       expect(clientStub).has.not.been.called;
 
@@ -173,8 +197,8 @@ describe('internal api', () => {
         Promise.resolve(fakeRecaptchaAppCheckToken)
       );
       const storageWriteStub = stub(storage, 'writeTokenToStorage');
-
-      expect(await getToken(app)).to.equal(fakeRecaptchaAppCheckToken);
+      const result = await getToken(app);
+      expect(result).to.deep.equal({ token: fakeRecaptchaAppCheckToken.token });
       expect(storageWriteStub).has.been.calledWith(
         app,
         fakeRecaptchaAppCheckToken
@@ -187,7 +211,9 @@ describe('internal api', () => {
       setState(app, { ...getState(app), token: fakeRecaptchaAppCheckToken });
 
       const clientStub = stub(client, 'exchangeToken');
-      expect(await getToken(app)).to.equal(fakeRecaptchaAppCheckToken);
+      expect(await getToken(app)).to.deep.equal({
+        token: fakeRecaptchaAppCheckToken.token
+      });
       expect(clientStub).to.not.have.been.called;
 
       clock.restore();
@@ -202,9 +228,9 @@ describe('internal api', () => {
         Promise.resolve(fakeRecaptchaAppCheckToken)
       );
 
-      expect(await getToken(app, true)).to.deep.equal(
-        fakeRecaptchaAppCheckToken
-      );
+      expect(await getToken(app, true)).to.deep.equal({
+        token: fakeRecaptchaAppCheckToken.token
+      });
     });
   });
 

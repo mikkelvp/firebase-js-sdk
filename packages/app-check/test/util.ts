@@ -42,7 +42,11 @@ export function getFakeApp(): FirebaseApp {
 
 export function getFakeCustomTokenProvider(): AppCheckProvider {
   return {
-    getToken: () => Promise.resolve('fake-custom-token')
+    getToken: () =>
+      Promise.resolve({
+        token: 'fake-custom-app-check-token',
+        timeToLive: 1
+      })
   };
 }
 

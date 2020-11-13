@@ -20,11 +20,7 @@ import { expect } from 'chai';
 import { stub, SinonStub, useFakeTimers } from 'sinon';
 import { FirebaseApp } from '@firebase/app-types';
 import { getFakeApp } from '../test/util';
-import {
-  getExchangeCustomTokenRequest,
-  getExchangeRecaptchaTokenRequest,
-  exchangeToken
-} from './client';
+import { getExchangeRecaptchaTokenRequest, exchangeToken } from './client';
 import { FirebaseError } from '@firebase/util';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 
@@ -36,18 +32,6 @@ describe('client', () => {
     fetchStub = stub(window, 'fetch').returns(
       Promise.resolve(new Response('{}'))
     );
-  });
-
-  it('creates exchange custom token request correctly', () => {
-    const request = getExchangeCustomTokenRequest(app, 'fake-custom-token');
-    const { projectId, appId, apiKey } = app.options;
-
-    expect(request).to.deep.equal({
-      url: `https://autopush-firebaseappcheck-pa.sandbox.googleapis.com/v1alpha/projects/${projectId}/apps/${appId}:exchangeCustomToken?key=${apiKey}`,
-      body: {
-        custom_token: 'fake-custom-token'
-      }
-    });
   });
 
   it('creates exchange recaptcha token request correctly', () => {
@@ -78,7 +62,7 @@ describe('client', () => {
     );
 
     const response = await exchangeToken(
-      getExchangeCustomTokenRequest(app, 'fake-custom-token')
+      getExchangeRecaptchaTokenRequest(app, 'fake-custom-token')
     );
 
     expect(response).to.deep.equal({
@@ -99,7 +83,7 @@ describe('client', () => {
 
     try {
       await exchangeToken(
-        getExchangeCustomTokenRequest(app, 'fake-custom-token')
+        getExchangeRecaptchaTokenRequest(app, 'fake-custom-token')
       );
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
@@ -124,7 +108,7 @@ describe('client', () => {
 
     try {
       await exchangeToken(
-        getExchangeCustomTokenRequest(app, 'fake-custom-token')
+        getExchangeRecaptchaTokenRequest(app, 'fake-custom-token')
       );
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
@@ -151,7 +135,7 @@ describe('client', () => {
 
     try {
       await exchangeToken(
-        getExchangeCustomTokenRequest(app, 'fake-custom-token')
+        getExchangeRecaptchaTokenRequest(app, 'fake-custom-token')
       );
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
@@ -181,7 +165,7 @@ describe('client', () => {
 
     try {
       await exchangeToken(
-        getExchangeCustomTokenRequest(app, 'fake-custom-token')
+        getExchangeRecaptchaTokenRequest(app, 'fake-custom-token')
       );
     } catch (e) {
       expect(e).instanceOf(FirebaseError);
