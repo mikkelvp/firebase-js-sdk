@@ -19,7 +19,11 @@ import '../test/setup';
 import { expect } from 'chai';
 import { spy, stub, useFakeTimers } from 'sinon';
 import { FirebaseApp } from '@firebase/app-types';
-import { getFakeApp, getFakeCustomTokenProvider } from '../test/util';
+import {
+  getFakeApp,
+  getFakeCustomTokenProvider,
+  removegreCAPTCHAScriptsOnPage
+} from '../test/util';
 import { activate } from './api';
 import {
   getToken,
@@ -40,7 +44,10 @@ describe('internal api', () => {
     app = getFakeApp();
   });
 
-  afterEach(() => clearState());
+  afterEach(() => {
+    clearState();
+    removegreCAPTCHAScriptsOnPage();
+  });
   // TODO: test error conditions
   describe('getToken()', () => {
     const fakeRecaptchaToken = 'fake-recaptcha-token';

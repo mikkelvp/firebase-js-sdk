@@ -19,8 +19,13 @@ import '../test/setup';
 import { expect } from 'chai';
 import { stub } from 'sinon';
 import { FirebaseApp } from '@firebase/app-types';
-import { getFakeApp, getFakeGreCAPTCHA } from '../test/util';
-import { initialize, RECAPTCHA_URL, getToken } from './recaptcha';
+import {
+  getFakeApp,
+  getFakeGreCAPTCHA,
+  removegreCAPTCHAScriptsOnPage,
+  findgreCAPTCHAScriptsOnPage
+} from '../test/util';
+import { initialize, getToken } from './recaptcha';
 import * as utils from './util';
 import { getState } from './state';
 import { Deferred } from '@firebase/util';
@@ -114,31 +119,3 @@ describe('recaptcha', () => {
     });
   });
 });
-
-/**
- * Returns all script tags in DOM matching our reCAPTCHA url pattern.
- * Tests in other files may have inserted multiple reCAPTCHA scripts, because they don't
- * care about it.
- */
-function findgreCAPTCHAScriptsOnPage(): HTMLScriptElement[] {
-  const scriptTags = window.document.getElementsByTagName('script');
-  const tags = [];
-  for (const tag of Object.values(scriptTags)) {
-    if (tag.src && tag.src.includes(RECAPTCHA_URL)) {
-      tags.push(tag);
-    }
-  }
-  return tags;
-}
-
-function removegreCAPTCHAScriptsOnPage(): void {
-  const tags = findgreCAPTCHAScriptsOnPage();
-
-  for (const tag of tags) {
-    tag.remove();
-  }
-
-  if (self.grecaptcha) {
-    self.grecaptcha = undefined;
-  }
-}

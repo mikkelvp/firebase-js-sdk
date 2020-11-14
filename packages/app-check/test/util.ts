@@ -17,7 +17,7 @@
 
 import { FirebaseApp } from '@firebase/app-types';
 import { AppCheckProvider } from '@firebase/app-check-types';
-import { GreCAPTCHA } from '../src/recaptcha';
+import { GreCAPTCHA, RECAPTCHA_URL } from '../src/recaptcha';
 
 export function getFakeApp(): FirebaseApp {
   return {
@@ -56,4 +56,32 @@ export function getFakeGreCAPTCHA(): GreCAPTCHA {
     render: (_container, _parameters) => 'fake_widget_1',
     execute: (_siteKey, _options) => Promise.resolve('fake_recaptcha_token')
   };
+}
+
+/**
+ * Returns all script tags in DOM matching our reCAPTCHA url pattern.
+ * Tests in other files may have inserted multiple reCAPTCHA scripts, because they don't
+ * care about it.
+ */
+export function findgreCAPTCHAScriptsOnPage(): HTMLScriptElement[] {
+  const scriptTags = window.document.getElementsByTagName('script');
+  const tags = [];
+  for (const tag of Object.values(scriptTags)) {
+    if (tag.src && tag.src.includes(RECAPTCHA_URL)) {
+      tags.push(tag);
+    }
+  }
+  return tags;
+}
+
+export function removegreCAPTCHAScriptsOnPage(): void {
+  const tags = findgreCAPTCHAScriptsOnPage();
+
+  for (const tag of tags) {
+    tag.remove();
+  }
+
+  if (self.grecaptcha) {
+    self.grecaptcha = undefined;
+  }
 }

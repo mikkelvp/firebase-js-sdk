@@ -19,6 +19,7 @@ import { _FirebaseNamespace } from '@firebase/app-types/private';
 import { Component, ComponentType } from '@firebase/component';
 import { FirebaseAppCheck } from '@firebase/app-check-types';
 import { factory, internalFactory } from './factory';
+import { initializeDebugMode } from './debug';
 
 const APP_CHECK_NAME = 'appCheck';
 const APP_CHECK_NAME_INTERNAL = 'appCheckInternal';
@@ -51,6 +52,7 @@ function registerAppCheck(firebase: _FirebaseNamespace): void {
 }
 
 registerAppCheck(firebase as _FirebaseNamespace);
+initializeDebugMode();
 
 /**
  * Define extension behavior of `registerAnalytics`

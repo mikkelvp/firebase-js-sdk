@@ -22,12 +22,13 @@ import {
   AppCheckTokenListener
 } from '@firebase/app-check-interop-types';
 import { AppCheckToken as AppCheckTokenCustom } from '@firebase/app-check-types';
-import { AppCheckTokenLocal, getState, setState } from './state';
+import { AppCheckTokenLocal, getDebugState, getState, setState } from './state';
 import { TOKEN_REFRESH_TIME, DUMMY_TOKEN } from './constants';
 import { Refresher } from './proactive-refresh';
 import { ensureActivated } from './util';
 import { exchangeToken, getExchangeRecaptchaTokenRequest } from './client';
 import { writeTokenToStorage, readTokenFromStorage } from './storage';
+import { getDebugToken, isDebugMode } from './debug';
 
 /**
  * This function will always resolve.
@@ -39,6 +40,16 @@ export async function getToken(
   forceRefresh = false
 ): Promise<AppCheckTokenResult> {
   ensureActivated(app);
+
+  /**
+   * DEBUG MODE
+   * return the debug token directly
+   */
+  if (isDebugMode()) {
+    return {
+      token: await getDebugToken()
+    };
+  }
 
   const state = getState(app);
 
@@ -103,7 +114,6 @@ export async function getToken(
   }
 
   notifyTokenListeners(app, interopTokenResult);
-  console.log('the returned token is ', interopTokenResult);
   return interopTokenResult;
 }
 
@@ -117,19 +127,36 @@ export function addTokenListener(
     tokenListeners: [...state.tokenListeners, listener]
   };
 
-  if (!newState.tokenRefresher) {
-    const tokenRefresher = createTokenRefresher(app);
-    newState.tokenRefresher = tokenRefresher;
-  }
+  /**
+   * DEBUG MODE
+   *
+   * invoke the listener once with the debug token.
+   */
+  if (isDebugMode()) {
+    const debugState = getDebugState();
+    if (debugState.enabled && debugState.token) {
+      debugState.token.promise.then(token => listener({ token }));
+    }
+  } else {
+    /**
+     * PROD MODE
+     *
+     * invoke the listener with the valid token, then start the token refresher
+     */
+    if (!newState.tokenRefresher) {
+      const tokenRefresher = createTokenRefresher(app);
+      newState.tokenRefresher = tokenRefresher;
+    }
 
-  if (!newState.tokenRefresher.isRunning()) {
-    newState.tokenRefresher.start();
-  }
+    if (!newState.tokenRefresher.isRunning()) {
+      newState.tokenRefresher.start();
+    }
 
-  // invoke the listener async immediately if there is a valid token
-  if (state.token && isValid(state.token)) {
-    const validToken = state.token;
-    Promise.resolve().then(() => listener(validToken));
+    // invoke the listener async immediately if there is a valid token
+    if (state.token && isValid(state.token)) {
+      const validToken = state.token;
+      Promise.resolve().then(() => listener(validToken));
+    }
   }
 
   setState(app, newState);

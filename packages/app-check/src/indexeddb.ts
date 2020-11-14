@@ -15,12 +15,13 @@
  * limitations under the License.
  */
 
-import { AppCheckTokenLocal } from '@firebase/app-check/src/state';
+import { AppCheckTokenLocal } from './state';
 import { FirebaseApp } from '@firebase/app-types';
 import { ERROR_FACTORY, AppCheckError } from './errors';
 const DB_NAME = 'firebase-app-check-database';
 const DB_VERSION = 1;
 const STORE_NAME = 'firebase-app-check-store';
+const DEBUG_TOKEN_KEY = 'debug-token';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 function getDBPromise(): Promise<IDBDatabase> {
@@ -71,14 +72,58 @@ function getDBPromise(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-export async function readTokenFromIndexedDB(
+export function readTokenFromIndexedDB(
   app: FirebaseApp
 ): Promise<AppCheckTokenLocal | undefined> {
+  return read(computeKey(app)) as Promise<AppCheckTokenLocal | undefined>;
+}
+
+export function writeTokenToIndexedDB(
+  app: FirebaseApp,
+  token: AppCheckTokenLocal
+): Promise<void> {
+  return write(computeKey(app), token);
+}
+
+export function writeDebugTokenToIndexedDB(token: string): Promise<void> {
+  return write(DEBUG_TOKEN_KEY, token);
+}
+
+export function readDebugTokenFromIndexedDB(): Promise<string | undefined> {
+  return read(DEBUG_TOKEN_KEY) as Promise<string | undefined>;
+}
+
+async function write(key: string, value: unknown): Promise<void> {
+  const db = await getDBPromise();
+
+  const transaction = db.transaction(STORE_NAME, 'readwrite');
+  const store = transaction.objectStore(STORE_NAME);
+  const request = store.put({
+    compositeKey: key,
+    value
+  });
+
+  return new Promise((resolve, reject) => {
+    request.onsuccess = _event => {
+      resolve();
+    };
+
+    transaction.onerror = event => {
+      reject(
+        ERROR_FACTORY.create(AppCheckError.STORAGE_WRITE, {
+          originalErrorMessage: (event.target as IDBRequest).error?.message
+        })
+      );
+    };
+  });
+}
+
+async function read(key: string): Promise<unknown> {
   const db = await getDBPromise();
 
   const transaction = db.transaction(STORE_NAME, 'readonly');
   const store = transaction.objectStore(STORE_NAME);
-  const request = store.get(computeKey(app));
+  const request = store.get(key);
 
   return new Promise((resolve, reject) => {
     request.onsuccess = event => {
@@ -94,34 +139,6 @@ export async function readTokenFromIndexedDB(
     transaction.onerror = event => {
       reject(
         ERROR_FACTORY.create(AppCheckError.STORAGE_GET, {
-          originalErrorMessage: (event.target as IDBRequest).error?.message
-        })
-      );
-    };
-  });
-}
-
-export async function writeTokenToIndexedDB(
-  app: FirebaseApp,
-  token: AppCheckTokenLocal
-): Promise<void> {
-  const db = await getDBPromise();
-
-  const transaction = db.transaction(STORE_NAME, 'readwrite');
-  const store = transaction.objectStore(STORE_NAME);
-  const request = store.put({
-    compositeKey: computeKey(app),
-    value: token
-  });
-
-  return new Promise((resolve, reject) => {
-    request.onsuccess = _event => {
-      resolve();
-    };
-
-    transaction.onerror = event => {
-      reject(
-        ERROR_FACTORY.create(AppCheckError.STORAGE_WRITE, {
           originalErrorMessage: (event.target as IDBRequest).error?.message
         })
       );

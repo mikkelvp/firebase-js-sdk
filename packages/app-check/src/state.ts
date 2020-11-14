@@ -41,10 +41,19 @@ export interface ReCAPTCHAState {
   widgetId?: string;
 }
 
-export const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
+export interface DebugState {
+  enabled: boolean;
+  token?: Deferred<string>;
+}
+
+const APP_CHECK_STATES = new Map<FirebaseApp, AppCheckState>();
 export const DEFAULT_STATE: AppCheckState = {
   activated: false,
   tokenListeners: []
+};
+
+const DEBUG_STATE: DebugState = {
+  enabled: false
 };
 
 export function getState(app: FirebaseApp): AppCheckState {
@@ -58,4 +67,8 @@ export function setState(app: FirebaseApp, state: AppCheckState): void {
 // for testing only
 export function clearState(): void {
   APP_CHECK_STATES.clear();
+}
+
+export function getDebugState(): DebugState {
+  return DEBUG_STATE;
 }

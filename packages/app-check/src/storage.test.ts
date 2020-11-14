@@ -27,7 +27,7 @@ describe('Storage', () => {
   const app = getFakeApp();
   const fakeToken = {
     token: 'fake-app-check-token',
-    expirationTime: 123
+    expirationTime: 345
   };
 
   it('sets and gets appCheck token to indexeddb', async () => {

@@ -15,10 +15,16 @@
  * limitations under the License.
  */
 
-import { AppCheckTokenLocal } from '@firebase/app-check/src/state';
+import { AppCheckTokenLocal } from './state';
+import { uuidv4 } from './util';
 import { FirebaseApp } from '@firebase/app-types';
 import { isIndexedDBAvailable } from '@firebase/util';
-import { readTokenFromIndexedDB, writeTokenToIndexedDB } from './indexeddb';
+import {
+  readDebugTokenFromIndexedDB,
+  readTokenFromIndexedDB,
+  writeDebugTokenToIndexedDB,
+  writeTokenToIndexedDB
+} from './indexeddb';
 
 /**
  * Always resolves. In case of an error reading from indexeddb, resolve with undefined
@@ -55,4 +61,36 @@ export function writeTokenToStorage(
   }
 
   return Promise.resolve();
+}
+
+export async function readOrCreateDebugTokenFromStorage(): Promise<string> {
+  /**
+   * Theoretically race condition can happen if we read, then write in 2 separate transactions.
+   * But it won't happen here, because this function will be called exactly once.
+   */
+  let existingDebugToken: string | undefined = undefined;
+  try {
+    existingDebugToken = await readDebugTokenFromIndexedDB();
+  } catch (_e) {
+    // failed to read from indexeddb. We assume there is no existing debug token, and generate a new one.
+  }
+
+  if (!existingDebugToken) {
+    // create a new debug token
+    const newToken = uuidv4();
+    // We don't need to block on writing to indexeddb
+    // In case persistence failed, a new debug token will be generated everytime the page is refreshed.
+    // It renders the debug token useless because you have to manually register(whitelist) the new token in the firebase console again and again.
+    // If you see this error trying to use debug token, it probably means you are using a browser that doesn't support indexeddb.
+    // You should switch to a different browser that supports indexeddb
+    writeDebugTokenToIndexedDB(newToken).catch(e =>
+      console.warn(`Failed to persist debug token to indexeddb. Error: ${e}`)
+    );
+    console.log(
+      `AppCheck debug token: ${newToken}. You will need to whitelist it in the Firebase console for it to work`
+    );
+    return newToken;
+  } else {
+    return existingDebugToken;
+  }
 }
